@@ -1,0 +1,125 @@
+/* Global stylesheet — Tailwind v4 + token-based theming.
+ *
+ * Semantic design tokens are defined as CSS custom properties on `:root`
+ * (light) with `.dark` overrides, then mapped into the Tailwind color
+ * namespace via `@theme inline`. Because the mapping is `inline`, the
+ * generated utilities reference the raw custom property (e.g. `bg-surface`
+ * → `background-color: var(--surface)`), so flipping the `dark` class on
+ * <html> retheme the whole app through one set of tokens. No component
+ * hardcodes a raw color — everything flows through these variables.
+ *
+ * Dark mode is class-based (not prefers-color-scheme) so the user toggle
+ * wins over the OS. The activation script lives in `src/app.html` and runs
+ * before first paint to avoid a flash of the wrong theme on reload.
+ */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Light theme (default) ---- */
+:root {
+  --background: #f6f8fa;
+  --surface: #ffffff; /* columns / tiles / drawer / switcher */
+  --surface-2: #f6f8fa; /* cards / chips / count */
+  --surface-3: #eef1f4; /* hover / pressed */
+  --foreground: #1f2328;
+  --foreground-soft: #24292f;
+  --muted: #59636e;
+  --faint: #6e7781;
+  --border: #d1d9e0;
+  --border-strong: #818b98;
+  --accent: #0969da;
+  --accent-strong: #0969da; /* selected / solid accent fill */
+  --on-accent: #ffffff;
+  --link: #0969da;
+  --link-soft: #0969da;
+  --success: #1a7f37;
+  --success-glow: rgba(26, 127, 55, 0.35);
+  --warning: #9a6700;
+  --warning-glow: rgba(154, 103, 0, 0.28);
+  --danger: #cf222e;
+  --scrim: rgba(31, 35, 40, 0.5); /* backdrop / drawer shadow */
+  --accent-tint: rgba(9, 105, 218, 0.13);
+  --success-tint: rgba(26, 127, 55, 0.13);
+  --danger-tint: rgba(207, 34, 46, 0.13);
+}
+
+/* ---- Dark theme ---- */
+.dark {
+  --background: #0d1117;
+  --surface: #161b22;
+  --surface-2: #21262d;
+  --surface-3: #262d36;
+  --foreground: #e6edf3;
+  --foreground-soft: #c9d1d9;
+  --muted: #8b949e;
+  --faint: #6e7681;
+  --border: #30363d;
+  --border-strong: #484f58;
+  --accent: #388bfd;
+  --accent-strong: #1f6feb;
+  --on-accent: #ffffff;
+  --link: #58a6ff;
+  --link-soft: #a5d6ff;
+  --success: #3fb950;
+  --success-glow: rgba(63, 185, 80, 0.6);
+  --warning: #d29922;
+  --warning-glow: rgba(210, 153, 34, 0.5);
+  --danger: #f85149;
+  --scrim: rgba(1, 4, 9, 0.55);
+  --accent-tint: rgba(31, 111, 235, 0.13);
+  --success-tint: rgba(35, 134, 54, 0.13);
+  --danger-tint: rgba(218, 54, 51, 0.13);
+}
+
+/* Map raw semantic variables into Tailwind's color namespace. */
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-foreground: var(--foreground);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
+  --color-link: var(--link);
+  --color-link-soft: var(--link-soft);
+  --color-success: var(--success);
+  --color-success-glow: var(--success-glow);
+  --color-warning: var(--warning);
+  --color-warning-glow: var(--warning-glow);
+  --color-danger: var(--danger);
+  --color-scrim: var(--scrim);
+  --color-accent-tint: var(--accent-tint);
+  --color-success-tint: var(--success-tint);
+  --color-danger-tint: var(--danger-tint);
+  --animate-drawer-slide: drawer-slide 0.16s ease-out;
+
+  @keyframes drawer-slide {
+    from {
+      transform: translateX(18px);
+      opacity: 0.6;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font: 15px system-ui, sans-serif;
+  }
+}

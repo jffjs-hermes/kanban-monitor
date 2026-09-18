@@ -10,27 +10,13 @@
 </script>
 
 <span
-  class="dot"
-  class:active={liveness === 'active'}
-  class:stalled={liveness === 'stalled'}
+  class="inline-block flex-none rounded-full"
+  class:bg-faint={liveness !== 'active' && liveness !== 'stalled'}
+  class:bg-success={liveness === 'active'}
+  class:bg-warning={liveness === 'stalled'}
+  class:shadow-[0_0_6px_var(--success-glow)]={liveness === 'active'}
+  class:shadow-[0_0_6px_var(--warning-glow)]={liveness === 'stalled'}
   style={`width:${size}px;height:${size}px`}
   title={title}
   aria-label={title}
 ></span>
-
-<style>
-  .dot {
-    display: inline-block;
-    border-radius: 50%;
-    background: #6e7681; /* grey — inactive / no liveness */
-    flex: 0 0 auto;
-  }
-  .active {
-    background: #3fb950; /* green — heartbeat fresh */
-    box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
-  }
-  .stalled {
-    background: #d29922; /* amber — overdue / stalled */
-    box-shadow: 0 0 6px rgba(210, 153, 34, 0.5);
-  }
-</style>

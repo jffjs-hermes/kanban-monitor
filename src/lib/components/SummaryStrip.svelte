@@ -52,79 +52,28 @@
   });
 </script>
 
-<div class="strip">
-  <div class="tiles">
+<div class="border-b border-default py-5">
+  <div class="flex flex-wrap items-center gap-2.5">
     {#each TILES as st (st)}
-      <span class="tile" data-status={st}>
-        <b>{counts[st]}</b> {STATUS_LABEL[st]}
+      <span class="rounded-md border border-default bg-surface px-3 py-2 text-[13px] text-muted" data-status={st}>
+        <b class="mr-1 tabular-nums text-foreground">{counts[st]}</b> {STATUS_LABEL[st]}
       </span>
     {/each}
-    <span class="tile running"><b>{summary.runningCount}</b> running</span>
-    <span class="tile stalled"><b>{summary.stalledCount}</b> stalled</span>
+    <span class="rounded-md border border-default bg-surface px-3 py-2 text-[13px] text-muted"><b class="mr-1 tabular-nums text-accent">{summary.runningCount}</b> running</span>
+    <span class="rounded-md border border-default bg-surface px-3 py-2 text-[13px] text-muted"><b class="mr-1 tabular-nums text-warning">{summary.stalledCount}</b> stalled</span>
   </div>
-  <div class="meta">
+  <div class="mt-3 flex flex-wrap items-center gap-[18px] text-[12px] text-faint">
     <span class="slots">slots: {summary.maxInProgress ?? '—'}</span>
-    <span class="cart">
+    <span class="text-muted">
       {#each AUX as st (st)}
         <b>{counts[st]}</b> {STATUS_LABEL[st]}{#if st !== 'archived'} · {/if}
       {/each}
     </span>
     <span class="clock"
       >last updated
-      <b>{summary.lastSyncedAt ? fmtClock(now) : '—'}</b>
-      {#if !connected}<span class="offline"> (offline)</span>{/if}
+      <b class="tabular-nums text-muted">{summary.lastSyncedAt ? fmtClock(now) : '—'}</b>
+      {#if !connected}<span class="text-danger"> (offline)</span>{/if}
       {#if seq !== null}· <span data-seq>seq {seq}</span>{/if}</span
     >
   </div>
 </div>
-
-<style>
-  .strip {
-    padding: 20px 0;
-    border-bottom: 1px solid #30363d;
-  }
-  .tiles {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .tile {
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    padding: 8px 12px;
-    color: #8b949e;
-    font-size: 13px;
-  }
-  .tile b {
-    color: #e6edf3;
-    font-variant-numeric: tabular-nums;
-    margin-right: 4px;
-  }
-  .tile.running b {
-    color: #388bfd;
-  }
-  .tile.stalled b {
-    color: #d29922;
-  }
-  .meta {
-    display: flex;
-    gap: 18px;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-top: 12px;
-    color: #6e7681;
-    font-size: 12px;
-  }
-  .cart {
-    color: #8b949e;
-  }
-  .clock b {
-    color: #8b949e;
-    font-variant-numeric: tabular-nums;
-  }
-  .offline {
-    color: #f85149;
-  }
-</style>

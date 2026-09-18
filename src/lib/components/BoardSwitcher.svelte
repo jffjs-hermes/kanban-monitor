@@ -20,11 +20,14 @@
   }
 </script>
 
-<div class="switcher">
+<div class="flex flex-wrap items-center gap-1.5">
   {#each boards as b (b.slug)}
     <button
-      class="board"
+      class="cursor-pointer rounded-md border px-3 py-1.5 text-[13px] transition-colors duration-100 border-default bg-surface text-muted hover:border-border-strong hover:text-foreground"
       class:selected={b.slug === current}
+      class:border-accent-strong={b.slug === current}
+      class:bg-accent-strong={b.slug === current}
+      class:text-on-accent={b.slug === current}
       onclick={() => onSelect(b.slug)}
       type="button"
     >
@@ -32,31 +35,3 @@
     </button>
   {/each}
 </div>
-
-<style>
-  .switcher {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .board {
-    background: #161b22;
-    border: 1px solid #30363d;
-    color: #8b949e;
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s, border-color 0.12s;
-  }
-  .board:hover {
-    color: #e6edf3;
-    border-color: #484f58;
-  }
-  .board.selected {
-    background: #1f6feb;
-    border-color: #1f6feb;
-    color: #fff;
-  }
-</style>
