@@ -5,13 +5,13 @@
 // summary strip, and returns the typed snapshot. No SQL lives here.
 
 import { readBoardRows } from './data-access';
+import { classify } from './liveness';
 import type { Database } from 'bun:sqlite';
 import type {
   BoardSlug,
   BoardSnapshot,
   BoardSummary,
   CardView,
-  Liveness,
   TaskRow,
   TaskStatus,
 } from '../types';
@@ -32,12 +32,6 @@ const STATUS_ORDER: Record<TaskStatus, number> = {
   archived: 7,
 };
 
-function livenessFor(task: TaskRow, now: number, staleMs: number): Liveness | null {
-  if (task.status !== 'running') return null;
-  if (task.last_heartbeat_at === null) return 'stalled';
-  return now - task.last_heartbeat_at < staleMs ? 'active' : 'stalled';
-}
-
 function toCard(task: TaskRow, opts: SnapshotOptions, lastOutcome: string | null,
   parentIds: string[], childIds: string[]): CardView {
   const running = task.status === 'running';
@@ -47,7 +41,7 @@ function toCard(task: TaskRow, opts: SnapshotOptions, lastOutcome: string | null
     assignee: task.assignee,
     priority: task.priority,
     status: task.status,
-    liveness: livenessFor(task, opts.now, opts.staleMs),
+    liveness: classify(task, opts.now, opts.staleMs),
     elapsedMs: running && task.started_at !== null ? (opts.now - task.started_at) * 1000 : null,
     createdAt: task.created_at,
     runCount: 0, // filled by caller
