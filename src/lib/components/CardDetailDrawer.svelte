@@ -13,6 +13,7 @@
   import { drawer, closeDrawer, openDrawer } from '$lib/card-drawer';
   import { renderMarkdown } from '$lib/markdown';
   import type { CardDetail, RunRow, TaskStatus } from '$lib/types';
+  import { findPrUrl } from '$lib/pr-link';
 
   let detail = $state<CardDetail | null>(null);
   let loading = $state(false);
@@ -20,6 +21,25 @@
 
   const st = $derived($drawer);
   const open = $derived(st.open && st.taskId !== null);
+
+  // Impl 9: the card's pull request, recovered from the most recent run's
+  // `metadata.published_pr` (falling back to the first full GitHub PR URL in
+  // the comments). Runs arrive ascending by id, so reverse for most-recent-first.
+  function parsedMeta(r: RunRow): Record<string, unknown> | null {
+    if (!r.metadata) return null;
+    try {
+      const v = JSON.parse(r.metadata);
+      return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const pr = $derived(
+    detail
+      ? findPrUrl([...detail.runs].reverse().map(parsedMeta), detail.comments)
+      : null,
+  );
 
   // Refetch whenever the drawer target or its refresh token changes.
   $effect(() => {
@@ -123,6 +143,9 @@
             {#if detail.card.assignee}<span class="rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-link-soft">{detail.card.assignee}</span>{/if}
             <span class="rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-muted">p{detail.card.priority}</span>
           </div>
+          {#if pr}
+            <a class="mt-2 inline-flex items-center gap-1 rounded-full border border-accent-strong bg-surface-2 px-2.5 py-0.5 text-[12px] text-link hover:bg-accent-tint" href={pr.url} target="_blank" rel="noreferrer">PR #{pr.number} ↗</a>
+          {/if}
         </div>
         <button class="flex-none cursor-pointer rounded-md border border-default bg-transparent text-[18px] leading-none text-muted hover:border-border-strong hover:text-foreground" onclick={closeDrawer} aria-label="Close" type="button" style="width:30px;height:30px">×</button>
       </header>

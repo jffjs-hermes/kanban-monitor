@@ -41,6 +41,7 @@ export interface RunRow {
   started_at: number | null;
   ended_at: number | null;
   error: string | null;
+  metadata: string | null; // raw JSON from task_runs.metadata (e.g. published_pr)
 }
 
 export interface EventRow {
