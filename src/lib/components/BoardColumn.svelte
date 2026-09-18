@@ -21,7 +21,7 @@
   } = $props();
 </script>
 
-<section class="flex min-h-[300px] flex-col overflow-hidden rounded-lg border border-default bg-surface">
+<section class="flex min-h-[300px] min-w-[170px] flex-1 flex-col overflow-hidden rounded-lg border border-default bg-surface">
   <header
     class="flex items-center justify-between border-b border-default px-3.5 py-3"
     class:border-b-accent={!!accent}

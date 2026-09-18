@@ -141,7 +141,7 @@
       {now}
       connected={$board.connected}
     />
-    <main class="grid grid-cols-[repeat(5,minmax(180px,1fr))] items-start gap-3.5 md:grid-cols-2">
+    <main class="flex min-w-0 flex-nowrap items-start gap-3.5 overflow-x-auto">
       {#each COLUMN_DEFS as def (def.status)}
         {#if !def.collapsed || showMore}
           <BoardColumn
