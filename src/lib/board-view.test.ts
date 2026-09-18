@@ -1,0 +1,206 @@
+// Client-side SSE-consumer reducer tests (spec §7 "vitest component/SSE-consumer").
+// Drive the pure `reduceBoard` with the exact wire sequence a live stream
+// produces (reset → summary → cards → ping) and assert in-place mutations.
+
+import { describe, expect, it } from 'vitest';
+import {
+  COLUMN_DEFS,
+  groupByStatus,
+  initialBoardState,
+  PRIMARY_COLUMNS,
+  reduceBoard,
+  sortCards,
+} from './board-view';
+import type {
+  BoardSnapshot,
+  BoardSummary,
+  CardView,
+} from './types';
+
+const T = (n: number): number => 1_700_000_000_000 + n;
+
+function card(id: string, over: Partial<CardView> = {}): CardView {
+  return {
+    id,
+    title: `Card ${id}`,
+    assignee: null,
+    priority: 0,
+    status: 'ready',
+    liveness: null,
+    elapsedMs: null,
+    createdAt: 1_700_000_000,
+    runCount: 0,
+    lastOutcome: null,
+    parentIds: [],
+    childIds: [],
+    ...over,
+  };
+}
+
+function summary(over: Partial<BoardSummary> = {}): BoardSummary {
+  return {
+    countsByStatus: { triage: 0, todo: 0, ready: 0, running: 0, review: 0, blocked: 0, done: 0, archived: 0 },
+    runningCount: 0,
+    stalledCount: 0,
+    maxInProgress: null,
+    lastSyncedAt: T(0),
+    ...over,
+  };
+}
+
+function snapshot(slug = 'default', cards: CardView[] = [], over: Partial<BoardSnapshot> = {}): BoardSnapshot {
+  return { slug, cards, summary: summary(), ...over };
+}
+
+describe('reduceBoard — realtime sequence', () => {
+  it('ignores non-reset events before the baseline snapshot exists', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'cards', { upserts: [card('a')], removedIds: [] }, 1, T(1));
+    expect(s.snapshot).toBeNull();
+  });
+
+  it('replaces full state on reset', () => {
+    let s = initialBoardState('default');
+    const snap = snapshot('default', [card('a', { status: 'running' })]);
+    s = reduceBoard(s, 'reset', snap, 1, T(1));
+    expect(s.snapshot).not.toBeNull();
+    expect(s.snapshot!.cards).toHaveLength(1);
+    expect(s.snapshot!.cards[0].id).toBe('a');
+    expect(s.connected).toBe(true);
+    expect(s.seq).toBe(1);
+  });
+
+  it('merges a summary delta into the existing snapshot', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'reset', snapshot('default', [card('a')]), 1, T(1));
+    const sum = summary({ runningCount: 2, stalledCount: 1, lastSyncedAt: T(5) });
+    s = reduceBoard(s, 'summary', sum, 2, T(6));
+    expect(s.snapshot!.summary.runningCount).toBe(2);
+    expect(s.snapshot!.summary.stalledCount).toBe(1);
+    expect(s.seq).toBe(2);
+  });
+
+  it('upserts and removes cards in place on cards delta', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'reset', snapshot('default', [card('a'), card('b')], { summary: summary({ runningCount: 1 }) }), 1, T(1));
+    // 'b' moved running; 'a' removed; 'c' added ready.
+    s = reduceBoard(
+      s,
+      'cards',
+      {
+        upserts: [
+          card('b', { status: 'running', liveness: 'active', elapsedMs: 3000 }),
+          card('c', { status: 'ready', priority: 5 }),
+        ],
+        removedIds: ['a'],
+      },
+      2,
+      T(2),
+    );
+    const ids = s.snapshot!.cards.map((c) => c.id).sort();
+    expect(ids).toEqual(['b', 'c']);
+    expect(s.snapshot!.cards.find((c) => c.id === 'b')!.status).toBe('running');
+  });
+
+  it('sorts cards status → priority → age after a delta', () => {
+    let s = initialBoardState('default');
+    // Prev order from a reset is already sorted; deltas must preserve ordering.
+    s = reduceBoard(
+      s,
+      'reset',
+      snapshot('default', [
+        card('p0', { status: 'ready' }),
+        card('hi', { status: 'running' }),
+        card('rev', { status: 'review' }),
+      ]),
+      1,
+      T(1),
+    );
+    // New high-priority ready card + a done card appear via delta.
+    s = reduceBoard(
+      s,
+      'cards',
+      {
+        upserts: [
+          card('p9', { status: 'ready', priority: 9 }),
+          card('d1', { status: 'done' }),
+        ],
+        removedIds: [],
+      },
+      2,
+      T(2),
+    );
+    const order = s.snapshot!.cards.map((c) => c.id);
+    // status order: ready(index0) < running < review < done; within ready, p9 (priority 9) before p0.
+    expect(order.indexOf('p9')).toBeLessThan(order.indexOf('p0'));
+    expect(order.indexOf('p0')).toBeLessThan(order.indexOf('hi'));
+    expect(order.indexOf('hi')).toBeLessThan(order.indexOf('rev'));
+    expect(order.indexOf('rev')).toBeLessThan(order.indexOf('d1'));
+  });
+
+  it('does not drop a cards delta when a reset arrived first and summary is untouched', () => {
+    const snap = snapshot('default', [card('x')]);
+    let s = reduceBoard(initialBoardState(), 'reset', snap, 1, T(1));
+    s = reduceBoard(s, 'cards', { upserts: [card('y')], removedIds: [] }, 2, T(2));
+    expect(s.snapshot!.cards).toHaveLength(2);
+  });
+
+  it('tracks ping keep-alives and preserves the snapshot', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'reset', snapshot('default', [card('a')]), 1, T(1));
+    s = reduceBoard(s, 'ping', { at: T(20) }, 3, T(20));
+    expect(s.seq).toBe(3);
+    expect(s.lastEventAt).toBe(T(20));
+    expect(s.snapshot!.cards).toHaveLength(1);
+  });
+
+  it('surfaces connection loss and recovers on the next open', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'reset', snapshot('default', [card('a')]), 1, T(1));
+    s = reduceBoard(s, 'error', null, null);
+    expect(s.connected).toBe(false);
+    s = reduceBoard(s, 'open', null, null);
+    expect(s.connected).toBe(true);
+  });
+
+  it('captures staleMs from hello', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'hello', { slug: 'default', staleMs: 90_000 }, 1, T(1));
+    expect(s.staleMs).toBe(90_000);
+  });
+});
+
+describe('column formation helpers', () => {
+  it('exposes the five primary columns in order', () => {
+    expect(PRIMARY_COLUMNS).toEqual(['ready', 'running', 'review', 'blocked', 'done']);
+  });
+
+  it('marks triage/todo/archived as collapsed in the column defs', () => {
+    const collapsed = COLUMN_DEFS.filter((d) => d.collapsed).map((d) => d.status);
+    expect(collapsed).toContain('triage');
+    expect(collapsed).toContain('todo');
+    expect(collapsed).toContain('archived');
+    expect(COLUMN_DEFS).toHaveLength(8); // all statuses present
+  });
+
+  it('groups cards by status', () => {
+    const ready = [card('r1'), card('r2')];
+    const running = [card('run', { status: 'running' })];
+    const g = groupByStatus([...ready, ...running, card('done', { status: 'done' })]);
+    expect(g.ready).toHaveLength(2);
+    expect(g.running).toHaveLength(1);
+    expect(g.done).toHaveLength(1);
+    expect(g.blocked).toEqual([]);
+  });
+
+  it('sorts cards status → priority(desc) → age(asc)', () => {
+    const cards: CardView[] = [
+      card('old-low', { status: 'ready', priority: 1, createdAt: 100 }),
+      card('new-high', { status: 'ready', priority: 9, createdAt: 300 }),
+      card('mid', { status: 'ready', priority: 5, createdAt: 100 }),
+      card('running-one', { status: 'running', createdAt: 50 }),
+    ];
+    const s = sortCards(cards).map((c) => c.id);
+    expect(s).toEqual(['new-high', 'mid', 'old-low', 'running-one']);
+  });
+});
