@@ -52,7 +52,7 @@ export function listRuns(db: Database): RunRow[] {
     db,
     `SELECT id, task_id, status, outcome, summary, worker_pid,
             json_extract(metadata, '$.worker_session_id') AS worker_session_id,
-            started_at, ended_at, error
+            started_at, ended_at, error, metadata
        FROM task_runs`,
   );
 }
