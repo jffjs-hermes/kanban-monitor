@@ -1,24 +1,206 @@
 <script lang="ts">
-  type Card = { id: string; title: string; assignee: string; priority: number };
-  const columns: { label: string; cards: Card[] }[] = [
-    { label: 'Ready', cards: [] }, { label: 'Running', cards: [] }, { label: 'Review', cards: [] },
-    { label: 'Blocked', cards: [] }, { label: 'Done', cards: [] }
-  ];
-  let board = 'default';
-  const boards = ['default'];
-</script>
+  // Board view (spec §1.2, §4 client logic, §5.0 localStorage).
+  //
+  // Renders Ready → Running → Review → Blocked → Done columns (with
+  // triage/todo/archived collapsed behind a toggle), the summary strip, and the
+  // board switcher. Live updates arrive via `EventSource` → `board` store, so
+  // cards re-render in place when a delta arrives — no manual refresh. Board
+  // switch re-targets the stream + snapshot and persists in localStorage (§5.0).
+  import { board, selectBoard } from '$lib/board-client';
+  import { COLUMN_DEFS, groupByStatus } from '$lib/board-view';
+  import BoardColumn from '$lib/components/BoardColumn.svelte';
+  import SummaryStrip from '$lib/components/SummaryStrip.svelte';
+  import BoardSwitcher from '$lib/components/BoardSwitcher.svelte';
+  import { get } from 'svelte/store';
+  import type { BoardSlug } from '$lib/types';
 
+  const LS_KEY = 'kanban-monitor.board';
+
+  function readStored(): BoardSlug | null {
+    try {
+      const v = localStorage.getItem(LS_KEY);
+      return v && v.length > 0 ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  let boards: { slug: BoardSlug }[] = $state([]);
+  let showMore = $state(false);
+  let now = $state(Date.now()); // ticking clock for elapsed + footer
+
+  // Restore the persisted selection (or default) and start streaming. Read the
+  // initial value once into a plain const so `selectBoard` runs exactly once on
+  // setup without capturing the reactive binding.
+  const initialSlug: BoardSlug = readStored() ?? 'default';
+  let current: BoardSlug = $state(initialSlug);
+  selectBoard(initialSlug);
+
+  async function loadBoards() {
+    try {
+      const res = await fetch('/api/boards.json');
+      if (res.ok) {
+        const data = await res.json();
+        boards = data.boards ?? [];
+      }
+    } catch {
+      boards = [];
+    }
+  }
+
+  // Bootstrap: fetch the board list, and fall back to the JSON snapshot for an
+  // immediate first paint when the SSE stream hasn't delivered a reset yet
+  // (spec §1.2 "initial load / fallback"). Once EventSource delivers, its
+  // `reset` overwrites this baseline.
+  $effect(() => {
+    loadBoards();
+    const st = get(board);
+    if (!st.snapshot && !st.connected) {
+      fetch(`/api/board/${encodeURIComponent(st.slug)}.json`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error('snapshot failed'))))
+        .then((snap) => {
+          const next = get(board);
+          if (!next.snapshot) board.set({ ...next, snapshot: snap, connected: true, error: null });
+        })
+        .catch(() => {});
+    }
+  });
+
+  // Persist selection + re-target the stream on switch (§5.0).
+  function onSelect(slug: BoardSlug) {
+    current = slug;
+    try {
+      localStorage.setItem(LS_KEY, slug);
+    } catch {
+      /* storage unavailable — session-only */
+    }
+    selectBoard(slug);
+  }
+
+  // Tick the client clock every second (drives elapsed + footer timestamps).
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(t);
+  });
+</script>
 <svelte:head><title>Kanban Board Monitor</title></svelte:head>
+
 <div class="shell">
-  <header><div><h1>Kanban Board Monitor</h1><p>Read-only live view of the Hermes team</p></div>
-    <label>Board <select bind:value={board}>{#each boards as name}<option value={name}>{name}</option>{/each}</select></label>
+  <header>
+    <div class="brand">
+      <h1>Kanban Board Monitor</h1>
+      <p>Read-only live view of the Hermes team</p>
+    </div>
+    <div class="tools">
+      <BoardSwitcher {boards} {current} onSelect={onSelect} />
+    </div>
   </header>
-  <section class="summary"><span>Ready 0</span><span>Running 0</span><span>Review 0</span><span>Blocked 0</span><span>Done 0</span><small>Last sync: not connected</small></section>
-  <main>{#each columns as column}<section class="column"><h2>{column.label}<b>{column.cards.length}</b></h2>{#if column.cards.length === 0}<div class="empty">No cards</div>{:else}{#each column.cards as card}<article><strong>{card.title}</strong><small>{card.assignee} · priority {card.priority}</small></article>{/each}{/if}</section>{/each}</main>
+
+  {#if $board.snapshot}
+    {@const groups = groupByStatus($board.snapshot.cards)}
+    <SummaryStrip
+      summary={$board.snapshot.summary}
+      seq={$board.seq}
+      {now}
+      connected={$board.connected}
+    />
+    <main>
+      {#each COLUMN_DEFS as def (def.status)}
+        {#if !def.collapsed || showMore}
+          <BoardColumn
+            label={def.label}
+            cards={groups[def.status] ?? []}
+            {now}
+            frameAt={$board.snapshot.summary.lastSyncedAt}
+          />
+        {/if}
+      {/each}
+    </main>
+    {#if COLUMN_DEFS.some((d) => d.collapsed)}
+      <button class="more" onclick={() => (showMore = !showMore)} type="button">
+        {showMore ? 'hide' : 'Show'} more columns (triage / todo / archived)
+      </button>
+    {/if}
+  {:else}
+    <div class="loading">
+      {#if $board.error}
+        <p class="err">{$board.error} — retrying…</p>
+      {:else}
+        <p>Connecting to board <b>{$board.slug}</b>…</p>
+      {/if}
+    </div>
+  {/if}
 </div>
+
 <style>
-  :global(*) { box-sizing: border-box } :global(body) { margin: 0; background: #0d1117; color: #e6edf3; font: 15px system-ui, sans-serif }
-  .shell { max-width: 1500px; margin: auto; padding: 28px } header { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #30363d; padding-bottom:22px } h1 { margin:0; font-size:28px } p { color:#8b949e; margin:6px 0 0 } label { color:#8b949e } select { margin-left:8px; background:#161b22; border:1px solid #484f58; color:#e6edf3; border-radius:6px; padding:8px 30px 8px 10px }
-  .summary { display:flex; gap:12px; align-items:center; padding:20px 0; color:#8b949e } .summary span { background:#161b22; border:1px solid #30363d; border-radius:6px; padding:8px 12px } .summary small { margin-left:auto } main { display:grid; grid-template-columns:repeat(5, minmax(180px,1fr)); gap:14px } .column { background:#161b22; border:1px solid #30363d; border-radius:8px; min-height:300px; padding:14px } h2 { margin:0 0 14px; font-size:16px } h2 b { float:right; color:#8b949e; font-weight:normal } .empty { color:#6e7681; text-align:center; padding:45px 0 } article { background:#21262d; border:1px solid #30363d; border-radius:6px; padding:12px; margin-bottom:10px } article strong, article small { display:block } article small { color:#8b949e; margin-top:8px }
-  @media (max-width: 900px) { main { grid-template-columns:repeat(2, 1fr) } .summary { flex-wrap:wrap } .summary small { margin-left:0; width:100% } } 
+  * {
+    box-sizing: border-box;
+  }
+  :global(body) {
+    margin: 0;
+    background: #0d1117;
+    color: #e6edf3;
+    font: 15px system-ui, sans-serif;
+  }
+  .shell {
+    max-width: 1500px;
+    margin: auto;
+    padding: 28px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 22px;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .brand h1 {
+    margin: 0;
+    font-size: 26px;
+  }
+  .brand p {
+    color: #8b949e;
+    margin: 6px 0 0;
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  main {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(180px, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
+  .more {
+    margin-top: 18px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    border-radius: 6px;
+    padding: 8px 14px;
+    cursor: pointer;
+  }
+  .more:hover {
+    color: #e6edf3;
+  }
+  .loading {
+    padding: 60px 0;
+    color: #8b949e;
+    text-align: center;
+  }
+  .loading .err {
+    color: #f85149;
+  }
+  .loading b {
+    color: #e6edf3;
+  }
+  @media (max-width: 900px) {
+    main {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
 </style>
