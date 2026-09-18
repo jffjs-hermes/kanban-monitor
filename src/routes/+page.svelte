@@ -7,6 +7,7 @@
   // cards re-render in place when a delta arrives — no manual refresh. Board
   // switch re-targets the stream + snapshot and persists in localStorage (§5.0).
   import { board, selectBoard } from '$lib/board-client';
+  import { openDrawer, closeDrawer } from '$lib/card-drawer';
   import { COLUMN_DEFS, groupByStatus } from '$lib/board-view';
   import BoardColumn from '$lib/components/BoardColumn.svelte';
   import SummaryStrip from '$lib/components/SummaryStrip.svelte';
@@ -69,6 +70,7 @@
   // Persist selection + re-target the stream on switch (§5.0).
   function onSelect(slug: BoardSlug) {
     current = slug;
+    closeDrawer(); // a different board invalidates any open card detail
     try {
       localStorage.setItem(LS_KEY, slug);
     } catch {
@@ -112,6 +114,7 @@
             cards={groups[def.status] ?? []}
             {now}
             frameAt={$board.snapshot.summary.lastSyncedAt}
+            onSelect={(id) => openDrawer(id, $board.slug)}
           />
         {/if}
       {/each}

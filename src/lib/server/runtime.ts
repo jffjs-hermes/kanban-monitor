@@ -19,9 +19,10 @@ import { openReadonly } from './data-access';
 import { hermesHome } from './board-discover';
 import { createPoller, type Poller, type PollerDelta } from './poller';
 import { resolveStaleMs } from './liveness';
+import { readCardDetail } from './card-detail';
 import { readSnapshot } from './snapshot';
 import { createSseHub, type BoardEvent, type SseHub } from './sse-hub';
-import type { BoardSlug, BoardSnapshot, SseEvent } from '../types';
+import type { BoardSlug, BoardSnapshot, CardDetail, SseEvent } from '../types';
 
 /** Default poll interval (spec §5 `POLL_INTERVAL_MS`). */
 export const DEFAULT_POLL_INTERVAL_MS = 1000;
@@ -47,6 +48,13 @@ export interface BoardRuntime {
   select(slug: BoardSlug): BoardSnapshot | null;
   /** Latest cached snapshot for `slug`, or null. */
   snapshotOf(slug: BoardSlug): BoardSnapshot | null;
+  /**
+   * Full typed detail for one card on `slug` (spec §2 `CardDetail`), or null
+   * when the board is missing/unreadable or the task id does not exist. Uses a
+   * short-lived read-only handle; safe to call from the detail endpoint on
+   * every open/refresh (§1.4 long-lived readers also fine).
+   */
+  detailOf(slug: BoardSlug, taskId: string): CardDetail | null;
   /** Resolved staleness threshold (spec §5 `STALE_WORKER_MS`). */
   staleMs(): number;
   /** Subscribe to `slug`'s deltas (delegates to the owned hub). */
@@ -178,6 +186,21 @@ export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
   return {
     select,
     snapshotOf: (slug) => snapshots.get(slug) ?? null,
+    detailOf(slug, taskId) {
+      const db = tryOpen(slug);
+      if (!db) return null;
+      try {
+        return readCardDetail(db, taskId, { staleMs, now: Date.now() / 1000 });
+      } catch {
+        return null; // board swapped/unreadable mid-read
+      } finally {
+        try {
+          db.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
     staleMs: () => staleMs,
     subscribe: (slug, send) => hub.subscribe(slug, send),
     subscribeAll: (send) => hub.subscribeAll(send),

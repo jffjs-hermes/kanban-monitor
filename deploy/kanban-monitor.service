@@ -1,0 +1,43 @@
+# Kanban Board Monitor — systemd user unit (spec §6 deploy).
+#
+# Runs the built SvelteKit adapter-node app as a single `bun` process and
+# restarts it on crash. Per spec §5 this is the app's only surface: PORT
+# (8787), HOST (0.0.0.0), HERMES_HOME (~/.hermes), STALE_WORKER_MS (90000),
+# POLL_INTERVAL_MS (1000), BOARD (default — see start board note below).
+#
+# Install (from the repo root), then enable + start at boot:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/kanban-monitor.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now kanban-monitor
+#   loginctl enable-linger "$USER"      # keep it running without a login session
+#   systemctl --user status kanban-monitor
+#
+# Jump to a specific board by default with:  systemctl --user edit kanban-monitor
+# and add `Environment=BOARD=kanban-monitor` under [Service].
+
+[Unit]
+Description=Kanban Board Monitor (SvelteKit adapter-node + SSE)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The built adapter-node output lives in ./build; `bun` (not node) is required
+# so the server's `bun:sqlite` imports resolve at runtime.
+WorkingDirectory=/home/jeff/Projects/kanban-monitor
+ExecStart=/home/jeff/.bun/bin/bun build/index.js
+Restart=on-failure
+RestartSec=2
+
+# Config/env surface (spec §5). PORT/HOST defaults match the `start` script;
+# HERMES_HOME points at the board root (default ~/.hermes if unset).
+Environment=PORT=8787
+Environment=HOST=0.0.0.0
+Environment=HERMES_HOME=/home/jeff/.hermes
+# Environment=STALE_WORKER_MS=90000
+# Environment=BOARD=kanban-monitor
+
+[Install]
+WantedBy=default.target

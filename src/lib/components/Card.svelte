@@ -13,7 +13,24 @@
     card,
     now,
     frameAt,
-  }: { card: CardView; now: number; frameAt: number } = $props();
+    onSelect,
+  }: {
+    card: CardView;
+    now: number;
+    frameAt: number;
+    onSelect?: (id: string) => void;
+  } = $props();
+
+  function handleClick() {
+    onSelect?.(card.id);
+  }
+
+  function handleKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleClick();
+    }
+  }
 
   function elapsedText(ms: number | null, startedMs: number | null): string {
     if (ms !== null && startedMs !== null) {
@@ -41,7 +58,16 @@
     card.elapsedMs !== null ? frameAt - card.elapsedMs : null;
 </script>
 
-<article class="card" class:running={card.status === 'running'} title={card.title}>
+<article
+  class="card"
+  class:running={card.status === 'running'}
+  class:clickable={!!onSelect}
+  title={card.title}
+  role={onSelect ? 'button' : undefined}
+  tabindex={onSelect ? 0 : undefined}
+  onclick={handleClick}
+  onkeydown={handleKey}
+>
   <div class="top">
     <strong class="title">{card.title}</strong>
     {#if card.status === 'running' && card.liveness}
@@ -72,6 +98,13 @@
   }
   .card.running {
     border-left: 3px solid #388bfd;
+  }
+  .card.clickable {
+    cursor: pointer;
+  }
+  .card.clickable:hover {
+    border-color: #2f81f7;
+    background: #262d36;
   }
   .top {
     display: flex;
