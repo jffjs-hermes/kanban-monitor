@@ -16,6 +16,32 @@
   import type { BoardSlug } from '$lib/types';
 
   const LS_KEY = 'kanban-monitor.board';
+  const THEME_KEY = 'kanban-monitor-theme';
+
+  // Theme: toggle flips the `dark` class on <html>. Initial value is restored
+  // from localStorage (defaulting to the system preference), matching the
+  // no-FOUC init in app.html. Choosing an explicit theme wins over system.
+  let dark = $state(
+    (() => {
+      try {
+        const saved = localStorage.getItem(THEME_KEY);
+        if (saved === 'light') return false;
+        if (saved === 'dark') return true;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      } catch {
+        return false;
+      }
+    })(),
+  );
+  function toggleTheme() {
+    dark = !dark;
+    document.documentElement.classList.toggle('dark', dark);
+    try {
+      localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
+    } catch {
+      /* storage unavailable — session-only */
+    }
+  }
 
   function readStored(): BoardSlug | null {
     try {
@@ -87,14 +113,23 @@
 </script>
 <svelte:head><title>Kanban Board Monitor</title></svelte:head>
 
-<div class="shell">
-  <header>
+<div class="mx-auto max-w-[1500px] p-7">
+  <header class="flex flex-wrap items-center justify-between gap-6 border-b border-default pb-[22px]">
     <div class="brand">
-      <h1>Kanban Board Monitor</h1>
-      <p>Read-only live view of the Hermes team</p>
+      <h1 class="m-0 text-[26px]">Kanban Board Monitor</h1>
+      <p class="mt-1.5 text-muted">Read-only live view of the Hermes team</p>
     </div>
-    <div class="tools">
+    <div class="flex items-center gap-2.5">
       <BoardSwitcher {boards} {current} onSelect={onSelect} />
+      <button
+        class="cursor-pointer rounded-md border border-default bg-surface px-3 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:border-border-strong hover:text-foreground"
+        onclick={toggleTheme}
+        type="button"
+        aria-label="Toggle light/dark theme"
+        title="Toggle light/dark theme"
+      >
+        {dark ? 'Light' : 'Dark'}
+      </button>
     </div>
   </header>
 
@@ -106,7 +141,7 @@
       {now}
       connected={$board.connected}
     />
-    <main>
+    <main class="grid grid-cols-[repeat(5,minmax(180px,1fr))] items-start gap-3.5 md:grid-cols-2">
       {#each COLUMN_DEFS as def (def.status)}
         {#if !def.collapsed || showMore}
           <BoardColumn
@@ -120,90 +155,21 @@
       {/each}
     </main>
     {#if COLUMN_DEFS.some((d) => d.collapsed)}
-      <button class="more" onclick={() => (showMore = !showMore)} type="button">
+      <button
+        class="mt-[18px] cursor-pointer rounded-md border border-default bg-surface px-3.5 py-2 text-muted hover:text-foreground"
+        onclick={() => (showMore = !showMore)}
+        type="button"
+      >
         {showMore ? 'hide' : 'Show'} more columns (triage / todo / archived)
       </button>
     {/if}
   {:else}
-    <div class="loading">
+    <div class="py-[60px] text-center text-muted">
       {#if $board.error}
-        <p class="err">{$board.error} — retrying…</p>
+        <p class="text-danger">{$board.error} — retrying…</p>
       {:else}
-        <p>Connecting to board <b>{$board.slug}</b>…</p>
+        <p>Connecting to board <b class="text-foreground">{$board.slug}</b>…</p>
       {/if}
     </div>
   {/if}
 </div>
-
-<style>
-  * {
-    box-sizing: border-box;
-  }
-  :global(body) {
-    margin: 0;
-    background: #0d1117;
-    color: #e6edf3;
-    font: 15px system-ui, sans-serif;
-  }
-  .shell {
-    max-width: 1500px;
-    margin: auto;
-    padding: 28px;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid #30363d;
-    padding-bottom: 22px;
-    gap: 24px;
-    flex-wrap: wrap;
-  }
-  .brand h1 {
-    margin: 0;
-    font-size: 26px;
-  }
-  .brand p {
-    color: #8b949e;
-    margin: 6px 0 0;
-  }
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  main {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(180px, 1fr));
-    gap: 14px;
-    align-items: start;
-  }
-  .more {
-    margin-top: 18px;
-    background: #161b22;
-    border: 1px solid #30363d;
-    color: #8b949e;
-    border-radius: 6px;
-    padding: 8px 14px;
-    cursor: pointer;
-  }
-  .more:hover {
-    color: #e6edf3;
-  }
-  .loading {
-    padding: 60px 0;
-    color: #8b949e;
-    text-align: center;
-  }
-  .loading .err {
-    color: #f85149;
-  }
-  .loading b {
-    color: #e6edf3;
-  }
-  @media (max-width: 900px) {
-    main {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-</style>

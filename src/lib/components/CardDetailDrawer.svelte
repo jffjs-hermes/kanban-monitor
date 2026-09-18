@@ -100,10 +100,10 @@
 
   function runStatusClass(r: RunRow): string {
     const s = (r.status ?? '').toLowerCase();
-    if (s === 'running') return 'run-running';
-    if (s === 'completed' || s === 'done') return 'run-ok';
-    if (s === 'failed') return 'run-err';
-    return 'run-neu';
+    if (s === 'running') return 'bg-accent-tint text-link';
+    if (s === 'completed' || s === 'done') return 'bg-success-tint text-success';
+    if (s === 'failed') return 'bg-danger-tint text-danger';
+    return 'bg-surface-2 text-muted';
   }
 
   function transitionLabel(t: { from: TaskStatus | null; to: TaskStatus }): string {
@@ -112,106 +112,106 @@
 </script>
 
 {#if open && detail}
-  <div class="backdrop" onclick={onBackdropClose} onkeydown={onBackdropKey} role="presentation">
-    <div class="drawer" role="dialog" aria-modal="true" aria-label="Card detail" tabindex="-1">
-      <header class="head">
+  <div class="fixed inset-0 z-50 flex justify-end bg-scrim" onclick={onBackdropClose} onkeydown={onBackdropKey} role="presentation">
+    <div class="flex h-full w-[min(560px,94vw)] animate-drawer-slide flex-col border-l border-default bg-surface shadow-[-12px_0_32px_var(--scrim)]" role="dialog" aria-modal="true" aria-label="Card detail" tabindex="-1">
+      <header class="flex items-start justify-between gap-3 border-b border-default p-[18px_20px]">
         <div class="hd">
-          <h2>{detail.card.title}</h2>
-          <div class="chips">
-            <span class="chip status">{STATUS_LABEL[detail.card.status] ?? detail.card.status}</span>
-            {#if detail.card.assignee}<span class="chip assignee">{detail.card.assignee}</span>{/if}
-            <span class="chip prio">p{detail.card.priority}</span>
+          <h2 class="m-0 mb-2.5 break-words text-[18px] leading-[1.3] text-foreground">{detail.card.title}</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-accent-strong bg-surface-2 px-2.5 py-0.5 text-[12px] text-link-soft">{STATUS_LABEL[detail.card.status] ?? detail.card.status}</span>
+            {#if detail.card.assignee}<span class="rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-link-soft">{detail.card.assignee}</span>{/if}
+            <span class="rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-muted">p{detail.card.priority}</span>
           </div>
         </div>
-        <button class="close" onclick={closeDrawer} aria-label="Close" type="button">×</button>
+        <button class="flex-none cursor-pointer rounded-md border border-default bg-transparent text-[18px] leading-none text-muted hover:border-border-strong hover:text-foreground" onclick={closeDrawer} aria-label="Close" type="button" style="width:30px;height:30px">×</button>
       </header>
 
-      <div class="scroll">
-        <section class="body-sec">
-          <h3>Body</h3>
+      <div class="overflow-y-auto px-5 pt-1 pb-6">
+        <section class="border-b border-surface-2 py-4">
+          <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">Body</h3>
           {#if detail.body}
-            <pre class="body">{detail.body}</pre>
+            <pre class="m-0 break-words font-[inherit] whitespace-pre-wrap leading-[1.5] text-[14px] text-foreground-soft">{detail.body}</pre>
           {:else}
-            <p class="muted">No body.</p>
+            <p class="text-[13px] text-faint">No body.</p>
           {/if}
         </section>
 
-        <section class="trail-sec">
-          <h3>Status trail</h3>
+        <section class="border-b border-surface-2 py-4">
+          <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">Status trail</h3>
           {#if detail.transitions.length === 0}
-            <p class="muted">No status transitions recorded.</p>
+            <p class="text-[13px] text-faint">No status transitions recorded.</p>
           {:else}
-            <ol class="trail">
+            <ol class="m-0 flex list-none flex-col gap-1.5 p-0">
               {#each detail.transitions as t, i (i)}
-                <li>
-                  <span class="tarrow">{transitionLabel(t)}</span>
-                  <span class="tat">{fmtTime(t.at)}</span>
+                <li class="flex items-baseline justify-between gap-3">
+                  <span class="text-[13px] text-foreground">{transitionLabel(t)}</span>
+                  <span class="tabular-nums text-[12px] whitespace-nowrap text-faint">{fmtTime(t.at)}</span>
                 </li>
               {/each}
             </ol>
           {/if}
         </section>
 
-        <section class="runs-sec">
-          <h3>Runs <span class="count">{detail.runs.length}</span></h3>
+        <section class="border-b border-surface-2 py-4">
+          <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">Runs <span class="text-faint">{detail.runs.length}</span></h3>
           {#if detail.runs.length === 0}
-            <p class="muted">No runs yet.</p>
+            <p class="text-[13px] text-faint">No runs yet.</p>
           {:else}
             {#each detail.runs as r (r.id)}
-              <div class="run">
-                <div class="run-head">
-                  <span class="badge {runStatusClass(r)}">#{r.id} {r.status ?? '—'}</span>
-                  {#if r.outcome}<span class="outcome">{r.outcome}</span>{/if}
-                  <span class="when">{runBase(r)}</span>
+              <div class="mb-2.5 rounded-md border border-surface-2 bg-background p-[10px_12px]">
+                <div class="flex flex-wrap items-center gap-2.5">
+                  <span class="rounded-[10px] px-2 py-0.5 text-[12px] {runStatusClass(r)}">#{r.id} {r.status ?? '—'}</span>
+                  {#if r.outcome}<span class="text-[12px] text-muted">{r.outcome}</span>{/if}
+                  <span class="tabular-nums ml-auto text-[12px] text-faint">{runBase(r)}</span>
                 </div>
                 {#if r.summary}
-                  <pre class="run-summary">{r.summary}</pre>
+                  <pre class="m-0 mt-1.5 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{r.summary}</pre>
                 {/if}
                 {#if r.error}
-                  <pre class="run-error">{r.error}</pre>
+                  <pre class="m-0 mt-1.5 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-danger">{r.error}</pre>
                 {/if}
               </div>
             {/each}
           {/if}
         </section>
 
-        <section class="comments-sec">
-          <h3>Comments <span class="count">{detail.comments.length}</span></h3>
+        <section class="border-b border-surface-2 py-4">
+          <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">Comments <span class="text-faint">{detail.comments.length}</span></h3>
           {#if detail.comments.length === 0}
-            <p class="muted">No comments.</p>
+            <p class="text-[13px] text-faint">No comments.</p>
           {:else}
             {#each detail.comments as c (c.id)}
-              <div class="comment">
-                <div class="c-head"><b>{c.author}</b><span>{fmtTime(c.created_at)}</span></div>
-                <pre class="c-body">{c.body}</pre>
+              <div class="mb-2.5 rounded-md border border-surface-2 bg-background p-[10px_12px]">
+                <div class="mb-1.5 flex justify-between text-[12px] text-link-soft"><b>{c.author}</b><span class="text-faint">{fmtTime(c.created_at)}</span></div>
+                <pre class="m-0 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{c.body}</pre>
               </div>
             {/each}
           {/if}
         </section>
 
-        <section class="links-sec">
-          <h3>Links</h3>
-          <div class="links">
-            <div class="link-group">
-              <span class="lbl">Parents</span>
+        <section class="border-b border-surface-2 py-4">
+          <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">Links</h3>
+          <div class="flex flex-col gap-2.5">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <span class="w-[70px] text-[12px] text-muted">Parents</span>
               {#if detail.card.parentIds.length === 0}
-                <span class="muted">none</span>
+                <span class="text-[13px] text-faint">none</span>
               {:else}
-                <span class="chip-group">
+                <span class="flex flex-wrap gap-1.5">
                   {#each detail.card.parentIds as pid (pid)}
-                    <button class="chip link" onclick={() => openDrawer(pid, $drawer.slug)} type="button">{pid}</button>
+                    <button class="cursor-pointer rounded-full border border-accent-strong bg-surface-2 px-2.5 py-0.5 font-mono text-[12px] text-link hover:bg-accent-tint" onclick={() => openDrawer(pid, $drawer.slug)} type="button">{pid}</button>
                   {/each}
                 </span>
               {/if}
             </div>
-            <div class="link-group">
-              <span class="lbl">Children</span>
+            <div class="flex flex-wrap items-center gap-2.5">
+              <span class="w-[70px] text-[12px] text-muted">Children</span>
               {#if detail.card.childIds.length === 0}
-                <span class="muted">none</span>
+                <span class="text-[13px] text-faint">none</span>
               {:else}
-                <span class="chip-group">
+                <span class="flex flex-wrap gap-1.5">
                   {#each detail.card.childIds as cid (cid)}
-                    <button class="chip link" onclick={() => openDrawer(cid, $drawer.slug)} type="button">{cid}</button>
+                    <button class="cursor-pointer rounded-full border border-accent-strong bg-surface-2 px-2.5 py-0.5 font-mono text-[12px] text-link hover:bg-accent-tint" onclick={() => openDrawer(cid, $drawer.slug)} type="button">{cid}</button>
                   {/each}
                 </span>
               {/if}
@@ -219,83 +219,17 @@
           </div>
         </section>
 
-        <footer class="foot">
+        <footer class="pt-3.5 text-[12px] text-faint">
           created {fmtTime(detail.card.createdAt)} · {detail.card.runCount} run{detail.card.runCount === 1 ? '' : 's'}
         </footer>
       </div>
     </div>
   </div>
 {:else if open}
-  <div class="backdrop" onclick={onBackdropClose} onkeydown={onBackdropKey} role="presentation">
-    <div class="drawer status-pane" role="dialog" aria-modal="true" aria-label="Card detail">
-      <header class="head"><h2>Card detail</h2><button class="close" onclick={closeDrawer} aria-label="Close" type="button">×</button></header>
-      <p class="status-msg">{loading ? 'Loading…' : error ?? 'No detail.'}</p>
+  <div class="fixed inset-0 z-50 flex justify-end bg-scrim" onclick={onBackdropClose} onkeydown={onBackdropKey} role="presentation">
+    <div class="flex h-full w-[min(560px,94vw)] flex-col border-l border-default bg-surface p-[4px_20px] shadow-[-12px_0_32px_var(--scrim)]" role="dialog" aria-modal="true" aria-label="Card detail">
+      <header class="flex items-start justify-between gap-3 border-b border-default p-[18px_20px]"><h2 class="m-0 text-foreground">Card detail</h2><button class="flex-none cursor-pointer rounded-md border border-default bg-transparent text-[18px] leading-none text-muted hover:border-border-strong hover:text-foreground" onclick={closeDrawer} aria-label="Close" type="button" style="width:30px;height:30px">×</button></header>
+      <p class="text-[14px] text-muted">{loading ? 'Loading…' : error ?? 'No detail.'}</p>
     </div>
   </div>
 {/if}
-
-<style>
-  * { box-sizing: border-box; }
-  .backdrop {
-    position: fixed; inset: 0; background: rgba(1, 4, 9, 0.55);
-    z-index: 50; display: flex; justify-content: flex-end;
-  }
-  .drawer {
-    width: min(560px, 94vw); height: 100%; background: #161b22;
-    border-left: 1px solid #30363d; display: flex; flex-direction: column;
-    box-shadow: -12px 0 32px rgba(0,0,0,.45); animation: slide .16s ease-out;
-  }
-  @keyframes slide { from { transform: translateX(18px); opacity: .6; } to { transform: none; opacity: 1; } }
-  .head {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    gap: 12px; padding: 18px 20px; border-bottom: 1px solid #30363d;
-  }
-  .hd h2 { margin: 0 0 10px; font-size: 18px; color: #e6edf3; line-height: 1.3; word-break: break-word; }
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-  .chip {
-    background: #21262d; border: 1px solid #30363d; color: #8b949e;
-    border-radius: 12px; padding: 2px 10px; font-size: 12px;
-  }
-  .chip.status { color: #a5d6ff; border-color: #1f6feb; }
-  .chip.assignee { color: #a5d6ff; }
-  .chip.link { cursor: pointer; color: #58a6ff; border-color: #1f6feb; font-family: ui-monospace, monospace; }
-  .chip.link:hover { background: #1f6feb22; }
-  .close {
-    background: none; border: 1px solid #30363d; color: #8b949e;
-    width: 30px; height: 30px; border-radius: 6px; font-size: 18px; line-height: 1;
-    cursor: pointer; flex: none;
-  }
-  .close:hover { color: #e6edf3; border-color: #6e7681; }
-  .scroll { overflow-y: auto; padding: 4px 20px 24px; }
-  section { border-bottom: 1px solid #21262d; padding: 16px 0; }
-  h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #8b949e; }
-  h3 .count { color: #6e7681; }
-  .body, pre { margin: 0; font-family: inherit; font-size: 14px; color: #c9d1d9; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .muted { color: #6e7681; font-size: 13px; }
-  .trail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .trail li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-  .tarrow { color: #e6edf3; font-size: 13px; }
-  .tat { color: #6e7681; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .run { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
-  .run-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
-  .run-running { background: #1f6feb22; color: #58a6ff; }
-  .run-ok { background: #23863622; color: #3fb950; }
-  .run-err { background: #da363322; color: #f85149; }
-  .run-neu { background: #21262d; color: #8b949e; }
-  .outcome { font-size: 12px; color: #8b949e; }
-  .when { font-size: 12px; color: #6e7681; margin-left: auto; font-variant-numeric: tabular-nums; }
-  .run-summary { font-size: 13px; margin-top: 6px; }
-  .run-error { font-size: 13px; color: #f85149; margin-top: 6px; }
-  .comment { border: 1px solid #21262d; border-radius: 6px; background: #0d1117; padding: 10px 12px; margin-bottom: 10px; }
-  .c-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: #a5d6ff; }
-  .c-head span { color: #6e7681; }
-  .c-body { font-size: 13px; }
-  .links { display: flex; flex-direction: column; gap: 10px; }
-  .link-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .lbl { font-size: 12px; color: #8b949e; width: 70px; }
-  .chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
-  .foot { padding-top: 14px; color: #6e7681; font-size: 12px; }
-  .status-pane { padding: 4px 20px; }
-  .status-msg { color: #8b949e; font-size: 14px; }
-</style>

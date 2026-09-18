@@ -1,2 +1,16 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />%sveltekit.head%</head><body data-sveltekit-preload-data="hover"><div style="display: contents">%sveltekit.body%</div></body></html>
+<html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><script>
+  // Set the theme class before first paint to avoid a flash of the wrong
+  // theme on reload. The saved choice wins over the system preference; with
+  // no saved choice, fall back to prefers-color-scheme so first visit matches
+  // the OS. The toggle in the header persists here (key `kanban-monitor-theme`).
+  (function () {
+    try {
+      var stored = localStorage.getItem('kanban-monitor-theme');
+      var dark = stored
+        ? stored === 'dark'
+        : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (dark) document.documentElement.classList.add('dark');
+    } catch (e) {}
+  })();
+</script>%sveltekit.head%</head><body data-sveltekit-preload-data="hover"><div style="display: contents">%sveltekit.body%</div></body></html>

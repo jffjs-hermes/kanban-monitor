@@ -59,17 +59,20 @@
 </script>
 
 <article
-  class="card"
-  class:running={card.status === 'running'}
-  class:clickable={!!onSelect}
+  class="mb-2.5 rounded-md border border-default bg-surface-2 p-3 text-[14px]"
+  class:border-l-3={card.status === 'running'}
+  class:border-l-accent={card.status === 'running'}
+  class:cursor-pointer={!!onSelect}
+  class:hover:border-border-strong={!!onSelect}
+  class:hover:bg-surface-3={!!onSelect}
   title={card.title}
   role={onSelect ? 'button' : undefined}
   tabindex={onSelect ? 0 : undefined}
   onclick={handleClick}
   onkeydown={handleKey}
 >
-  <div class="top">
-    <strong class="title">{card.title}</strong>
+  <div class="flex items-start justify-between gap-2">
+    <strong class="block break-words leading-[1.3] text-foreground">{card.title}</strong>
     {#if card.status === 'running' && card.liveness}
       <LivenessDot
         liveness={card.liveness}
@@ -77,69 +80,12 @@
       />
     {/if}
   </div>
-  <div class="meta">
-    {#if card.assignee}<span class="assignee">{card.assignee}</span>{/if}
-    <span class="priority">p{card.priority}</span>
+  <div class="mt-2.5 flex flex-wrap gap-2.5 text-[12px] text-muted">
+    {#if card.assignee}<span class="text-link-soft">{card.assignee}</span>{/if}
+    <span class="rounded-[10px] border border-default bg-surface px-[7px]">p{card.priority}</span>
     {#if card.status === 'running' && card.elapsedMs !== null}
-      <span class="elapsed">{elapsedText(card.elapsedMs, startedMs())}</span>
+      <span class="tabular-nums text-foreground">{elapsedText(card.elapsedMs, startedMs())}</span>
     {/if}
-    {#if card.runCount > 1}<span class="runs">{card.runCount} tries</span>{/if}
+    {#if card.runCount > 1}<span class="text-faint">{card.runCount} tries</span>{/if}
   </div>
 </article>
-
-<style>
-  .card {
-    background: #21262d;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    padding: 12px;
-    margin-bottom: 10px;
-    font-size: 14px;
-  }
-  .card.running {
-    border-left: 3px solid #388bfd;
-  }
-  .card.clickable {
-    cursor: pointer;
-  }
-  .card.clickable:hover {
-    border-color: #2f81f7;
-    background: #262d36;
-  }
-  .top {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    justify-content: space-between;
-  }
-  .title {
-    display: block;
-    color: #e6edf3;
-    line-height: 1.3;
-    word-break: break-word;
-  }
-  .meta {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 10px;
-    color: #8b949e;
-    font-size: 12px;
-  }
-  .assignee {
-    color: #a5d6ff;
-  }
-  .priority {
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 10px;
-    padding: 0 7px;
-  }
-  .elapsed {
-    font-variant-numeric: tabular-nums;
-    color: #e6edf3;
-  }
-  .runs {
-    color: #6e7681;
-  }
-</style>

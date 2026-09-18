@@ -5,6 +5,7 @@
   // `ssr=false` is set in `+layout.ts`, so this stays client-only (no SSR data
   // requirements — spec §1.2 "+layout.ts … keep no-SSR").
   import CardDetailDrawer from '$lib/components/CardDetailDrawer.svelte';
+  import '../app.css';
 </script>
 
 <slot />
