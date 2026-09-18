@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 
-import { listBoards, hermesHome } from './board-discover';
+import { listBoards, hermesHome, slugFromPath } from './board-discover';
 import { openReadonly, readBoardRows, listTasks } from './data-access';
 import { readSnapshot } from './snapshot';
 
@@ -155,6 +155,19 @@ describe('board-discover', () => {
     before.close();
     after.close();
   });
+
+  it('recovers the board slug from a db path (path → slug, pure)', () => {
+    const home = makeTempHome(true);
+    tempHome = home;
+    process.env['HERMES_HOME'] = home;
+
+    expect(slugFromPath(join(home, 'kanban.db'))).toBe('default');
+    expect(slugFromPath(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'))).toBe('alpha');
+    // A nested dir deeper than <slug>/kanban.db does not match the layout.
+    expect(slugFromPath(join(home, 'kanban', 'boards', 'alpha', 'sub', 'kanban.db'))).toBe('default');
+    // Paths outside the known layout fall back to the default board.
+    expect(slugFromPath(join(resolve(mkdtempSync('slugnada-')), 'kanban.db'))).toBe('default');
+  });
 });
 
 describe('data-access', () => {
@@ -195,7 +208,7 @@ describe('snapshot', () => {
     tempHome = home;
     const now = 1_000_000_000;
     const db = openReadonly(join(home, 'kanban.db'));
-    const snap = readSnapshot(db, 'default', { staleMs: 90_000, now });
+    const snap = readSnapshot(db, { staleMs: 90_000, now });
 
     expect(snap.slug).toBe('default');
     // Archived task excluded.
@@ -217,7 +230,7 @@ describe('snapshot', () => {
     tempHome = home;
     const now = 1_000_000_000;
     const db = openReadonly(join(home, 'kanban.db'));
-    const snap = readSnapshot(db, 'default', { staleMs: 90_000, now });
+    const snap = readSnapshot(db, { staleMs: 90_000, now });
 
     const byId = Object.fromEntries(snap.cards.map((c) => [c.id, c]));
     const t1 = byId['t1'];
@@ -244,7 +257,7 @@ describe('snapshot', () => {
     const home = makeTempHome(true);
     tempHome = home;
     const db = openReadonly(join(home, 'kanban.db'));
-    const snap = readSnapshot(db, 'default', { staleMs: 90_000, now: 1_000_000_000 });
+    const snap = readSnapshot(db, { staleMs: 90_000, now: 1_000_000_000 });
 
     const ids = snap.cards.map((c) => c.id);
     // running (status order 3) block first; t1(prio5), t2(prio3), t3(prio1) by prio desc;
@@ -261,10 +274,21 @@ describe('snapshot', () => {
     w.exec(SCHEMA); // schema, but zero rows
     w.close();
     const db = openReadonly(dbPath);
-    const snap = readSnapshot(db, 'default', { staleMs: 90_000, now: 1_000_000_000 });
+    const snap = readSnapshot(db, { staleMs: 90_000, now: 1_000_000_000 });
     db.close();
     expect(snap.cards).toEqual([]);
     expect(snap.summary.runningCount).toBe(0);
     expect(snap.summary.stalledCount).toBe(0);
+  });
+
+  it('resolves the slug of a named board from its db handle', () => {
+    const home = makeTempHome(true);
+    tempHome = home;
+    process.env['HERMES_HOME'] = home;
+    const db = openReadonly(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'));
+    const snap = readSnapshot(db, { staleMs: 90_000, now: 1_000_000_000 });
+    db.close();
+    expect(snap.slug).toBe('alpha');
+    expect(snap.cards.length).toBeGreaterThan(0);
   });
 });

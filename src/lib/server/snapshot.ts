@@ -4,11 +4,11 @@
 // consumes through `data-access.ts`, derives the card view models and the
 // summary strip, and returns the typed snapshot. No SQL lives here.
 
-import { readBoardRows } from './data-access';
+import { boardDbPath, readBoardRows } from './data-access';
+import { slugFromPath } from './board-discover';
 import { classify } from './liveness';
 import type { Database } from 'bun:sqlite';
 import type {
-  BoardSlug,
   BoardSnapshot,
   BoardSummary,
   CardView,
@@ -53,10 +53,12 @@ function toCard(task: TaskRow, opts: SnapshotOptions, lastOutcome: string | null
 
 /**
  * Read the full, typed state of a board as of `now`, in a single read-only
- * transaction. `slug` identifies which board the given db handle was opened
- * for (a raw `Database` handle does not carry its own slug).
+ * transaction (spec §3: `readSnapshot(db, opts)`). The board slug is recovered
+ * from the handle itself (`PRAGMA database_list` → `board-discover` layout),
+ * because a raw bun:sqlite `Database` does not carry its own slug.
  */
-export function readSnapshot(db: Database, slug: BoardSlug, opts: SnapshotOptions): BoardSnapshot {
+export function readSnapshot(db: Database, opts: SnapshotOptions): BoardSnapshot {
+  const slug = slugFromPath(boardDbPath(db));
   const { tasks: taskRows, runs, links } = readBoardRows(db);
 
   // Latest attempt outcome per task (most recent run wins for stable results).

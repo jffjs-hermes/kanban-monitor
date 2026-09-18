@@ -19,6 +19,18 @@ export function openReadonly(path: string): Database {
   return new Database(path, { readonly: true });
 }
 
+/**
+ * The on-disk path a (read-only) handle was opened for, from `PRAGMA
+ * database_list`. A raw bun:sqlite `Database` carries no path property, and the
+ * filename is what `board-discover.slugFromPath` needs to recover the board
+ * slug. Returns '' for in-memory DBs.
+ */
+export function boardDbPath(db: Database): string {
+  const rows = db.query<{ name: string; file: string }, []>(`PRAGMA database_list`).all();
+  const main = rows.find((r) => r.name === 'main');
+  return main?.file ?? '';
+}
+
 function rows<T>(db: Database, sql: string): T[] {
   return db.query(sql).all() as T[];
 }

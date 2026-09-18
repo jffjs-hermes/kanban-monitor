@@ -9,6 +9,14 @@ import type { Liveness, TaskRow } from '../types';
 /** Default staleness threshold (spec §5 `STALE_WORKER_MS`, env-overridable). */
 export const DEFAULT_STALE_MS = 90_000;
 
+/** Resolve the staleness threshold from env (spec §3: `STALE_WORKER_MS`). */
+export function resolveStaleMs(): number {
+  const raw = process.env['STALE_WORKER_MS'];
+  if (raw === undefined || raw.trim() === '') return DEFAULT_STALE_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_STALE_MS;
+}
+
 /**
  * Classify a task's worker liveness as of `now` (unix seconds).
  *

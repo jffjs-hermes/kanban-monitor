@@ -8,6 +8,7 @@
 
 import { readSnapshot } from './snapshot';
 import { diffSnapshot } from './differ';
+import { resolveStaleMs } from './liveness';
 import type { Database } from 'bun:sqlite';
 import type { BoardSlug, BoardSnapshot, DeltaScope } from '../types';
 
@@ -20,26 +21,21 @@ export interface Poller {
   onDelta(cb: (delta: PollerDelta) => void): void;
 }
 
-export interface PollerOptions {
-  /** Board slug this poller watches (attached to every emitted delta). */
-  slug: BoardSlug;
-  /** Heartbeat staleness threshold for liveness classification (spec §5). */
-  staleMs: number;
-  /** Tick interval in ms (spec §5 `POLL_INTERVAL_MS`, default 1000). */
-  intervalMs?: number;
-}
-
 /** Default tick interval (spec §5 `POLL_INTERVAL_MS`). */
 export const DEFAULT_POLL_INTERVAL_MS = 1000;
 
 export function createPoller(
   getDb: () => Database | null,
-  opts: PollerOptions,
+  intervalMs?: number /* default 1000 */,
 ): Poller {
-  const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const tickEvery = intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const staleMs = resolveStaleMs(); // spec §3: STALE_WORKER_MS (default 90_000)
   let timer: ReturnType<typeof setInterval> | null = null;
   let running = false;
   let prev: BoardSnapshot | null = null;
+  // Board slug this poller serves, resolved from the first successful snapshot
+  // read (the handle itself carries it). Fallback during a first-tick failure.
+  let knownSlug: BoardSlug = 'default';
   const listeners = new Set<(delta: PollerDelta) => void>();
 
   const emit = (delta: PollerDelta) => {
@@ -55,16 +51,17 @@ export function createPoller(
     }
     let next: BoardSnapshot;
     try {
-      next = readSnapshot(db, opts.slug, { staleMs: opts.staleMs, now: Date.now() / 1000 });
+      next = readSnapshot(db, { staleMs, now: Date.now() / 1000 });
     } catch {
       // Read failed (DB swapped under us). Drop state and signal a full resend.
       prev = null;
-      emit({ kind: 'reset', slug: opts.slug });
+      emit({ kind: 'reset', slug: knownSlug });
       return;
     }
+    knownSlug = next.slug;
     const deltas = diffSnapshot(prev, next);
     prev = next;
-    for (const d of deltas) emit({ ...d, slug: opts.slug });
+    for (const d of deltas) emit({ ...d, slug: next.slug });
   };
 
   return {
@@ -72,7 +69,7 @@ export function createPoller(
       if (running) return;
       running = true;
       tick(); // emit immediately, then on every interval
-      timer = setInterval(tick, intervalMs);
+      timer = setInterval(tick, tickEvery);
     },
     stop() {
       running = false;

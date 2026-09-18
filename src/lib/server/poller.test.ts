@@ -69,7 +69,7 @@ describe('createPoller', () => {
     vi.useFakeTimers();
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
-    const poller: Poller = createPoller(() => db, { slug: 'default', staleMs: 90_000, intervalMs: 1000 });
+    const poller: Poller = createPoller(() => db, 1000);
     poller.onDelta((d) => deltas.push(d));
     poller.start();
 
@@ -102,7 +102,7 @@ describe('createPoller', () => {
     vi.useFakeTimers();
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
-    const poller: Poller = createPoller(() => db, { slug: 'default', staleMs: 90_000 });
+    const poller: Poller = createPoller(() => db);
     poller.onDelta((d) => deltas.push(d));
     poller.start();
 
@@ -118,7 +118,7 @@ describe('createPoller', () => {
     vi.useFakeTimers();
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
-    const poller: Poller = createPoller(() => db, { slug: 'default', staleMs: 90_000 });
+    const poller: Poller = createPoller(() => db);
     poller.onDelta((d) => deltas.push(d));
     poller.start();
     deltas.length = 0;
@@ -133,7 +133,7 @@ describe('createPoller', () => {
   it('holds state (no emission) when the db handle is unavailable', () => {
     vi.useFakeTimers();
     const deltas: PollerDelta[] = [];
-    const poller: Poller = createPoller(() => null, { slug: 'default', staleMs: 90_000 });
+    const poller: Poller = createPoller(() => null);
     poller.onDelta((d) => deltas.push(d));
     poller.start();
     vi.advanceTimersByTime(4_000);
@@ -145,7 +145,7 @@ describe('createPoller', () => {
     vi.useFakeTimers();
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
-    const poller: Poller = createPoller(() => db, { slug: 'default', staleMs: 90_000 });
+    const poller: Poller = createPoller(() => db);
     poller.onDelta((d) => deltas.push(d));
     poller.start();
     deltas.length = 0;
