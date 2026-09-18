@@ -11,6 +11,7 @@
   // making links actionable rather than inert ids. Escape, the backdrop, and
   // the × button all close it.
   import { drawer, closeDrawer, openDrawer } from '$lib/card-drawer';
+  import { renderMarkdown } from '$lib/markdown';
   import type { CardDetail, RunRow, TaskStatus } from '$lib/types';
 
   let detail = $state<CardDetail | null>(null);
@@ -130,7 +131,7 @@
         <section class="border-b border-surface-2 py-4">
           <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">Body</h3>
           {#if detail.body}
-            <pre class="m-0 break-words font-[inherit] whitespace-pre-wrap leading-[1.5] text-[14px] text-foreground-soft">{detail.body}</pre>
+            <div class="markdown-body">{@html renderMarkdown(detail.body)}</div>
           {:else}
             <p class="text-[13px] text-faint">No body.</p>
           {/if}
