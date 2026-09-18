@@ -10,12 +10,14 @@
     now,
     frameAt,
     accent = '',
+    onSelect,
   }: {
     label: string;
     cards: CardView[];
     now: number;
     frameAt: number;
     accent?: string;
+    onSelect?: (id: string) => void;
   } = $props();
 </script>
 
@@ -29,7 +31,7 @@
       <div class="empty">No cards</div>
     {:else}
       {#each cards as card (card.id)}
-        <Card {card} {now} {frameAt} />
+        <Card {card} {now} {frameAt} {onSelect} />
       {/each}
     {/if}
   </div>

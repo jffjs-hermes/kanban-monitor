@@ -11,6 +11,7 @@
 // drive the reducer without a browser.
 
 import { writable, type Writable } from 'svelte/store';
+import { markDirty } from './card-drawer';
 import {
   initialBoardState,
   reduceBoard,
@@ -61,6 +62,12 @@ function open(slug: BoardSlug): EventSource {
       }
       const seq = ev.lastEventId ? Number(ev.lastEventId) : null;
       board.update((s) => reduceBoard(s, name, data, seq));
+      // A `card` scope means one card's detail rows changed (§2.1). If that is
+      // the drawer's open card, bump its refresh token so it refetches.
+      if (name === 'card') {
+        const tid = (data as { taskId?: string } | null)?.taskId;
+        if (tid) markDirty(tid);
+      }
     });
   }
 

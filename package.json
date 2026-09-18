@@ -6,6 +6,7 @@
     "dev": "vite dev",
     "build": "bun --bun vite build",
     "preview": "vite preview",
+    "start": "PORT=${PORT:-8787} HOST=${HOST:-0.0.0.0} bun --bun build/index.js",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "bun test"
   },
