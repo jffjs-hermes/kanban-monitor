@@ -7,7 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run"
+    "test": "bun test"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
