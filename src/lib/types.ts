@@ -114,6 +114,13 @@ export interface BoardSnapshot {
   slug: BoardSlug;
   summary: BoardSummary;
   cards: CardView[]; // non-archived, sorted status → priority → age
+  /**
+   * Per-board monotonic revision (spec §3.1). Owned by the runtime; bumped by
+   * exactly +1 per non-trivial delta the poller publishes (trivial/no-change
+   * ticks and per-client SSE `seq` do NOT touch it). This is the addressable
+   * cursor both the agent REST and MCP surfaces read from.
+   */
+  revision: number;
 }
 
 // --- Diff / change scopes (§2.1) -------------------------------------------
@@ -123,6 +130,20 @@ export type DeltaScope =
   | { kind: 'cards'; upserts: CardView[]; removedIds: string[] }
   | { kind: 'card'; taskId: string } // detail data for one card changed
   | { kind: 'reset' }; // too big / DB swapped — resend full
+
+// --- Delta ring buffer (§3.2) ----------------------------------------------
+
+/** One entry in the shared per-board delta ring (spec §3.2). */
+export interface RevisionedDelta {
+  /** Board revision AFTER this delta was applied (the post-state cursor). */
+  revision: number;
+  scope: DeltaScope;
+}
+
+/** Result of a resumable `deltasSince` query (spec §3.2, §5). */
+export type DeltasSinceResult =
+  | { revision: number; deltas: DeltaScope[] } // resumable catch-up
+  | { reset: true; snapshot: BoardSnapshot | null }; // buffer miss / DB swap — rebuild
 
 // --- SSE wire payload (§2.2) -----------------------------------------------
 

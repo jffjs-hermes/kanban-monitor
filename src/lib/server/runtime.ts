@@ -22,14 +22,65 @@ import { resolveStaleMs } from './liveness';
 import { readCardDetail } from './card-detail';
 import { readSnapshot } from './snapshot';
 import { createSseHub, type BoardEvent, type SseHub } from './sse-hub';
-import type { BoardSlug, BoardSnapshot, CardDetail, SseEvent } from '../types';
+import type {
+  BoardSlug,
+  BoardSnapshot,
+  CardDetail,
+  DeltaScope,
+  DeltasSinceResult,
+  RevisionedDelta,
+  SseEvent,
+} from '../types';
 
 /** Default poll interval (spec §5 `POLL_INTERVAL_MS`). */
 export const DEFAULT_POLL_INTERVAL_MS = 1000;
 
+/** Default per-board delta ring cap (spec §3.2 — last ~256 entries / ~5 min). */
+export const DEFAULT_RING_CAP = 256;
+
 export interface BoardRuntimeOptions {
   /** Override the poll tick interval (spec §5, default 1000ms). */
   pollIntervalMs?: number;
+  /** Override the per-board delta ring cap (spec §3.2, default 256). */
+  ringCap?: number;
+}
+
+/** A bounded per-board ring of (revisionAfter, DeltaScope) entries (§3.2). */
+interface DeltaRing {
+  entries: RevisionedDelta[]; // oldest first, newest last
+  /**
+   * Minimum `since` value `deltasSince` can serve: every revision in
+   * `(readyFrom, currentRev]` is present in `entries`. Raised by eviction and
+   * by interleaved `reset` deltas — below it a client must rebuild.
+   */
+  readyFrom: number;
+}
+
+function makeRing(): DeltaRing {
+  return { entries: [], readyFrom: 0 };
+}
+
+/** Append a scoped delta at `revision`, evicting oldest groups over the cap. */
+function ringPush(ring: DeltaRing, revision: number, scope: DeltaScope, cap: number) {
+  ring.entries.push({ revision, scope });
+  while (ring.entries.length > cap) {
+    // Drop whole revision-groups (a tick can store several scopes at one rev).
+    const oldestRev = ring.entries[0].revision;
+    while (ring.entries.length > 0 && ring.entries[0].revision === oldestRev) {
+      ring.entries.shift();
+    }
+    ring.readyFrom = Math.max(ring.readyFrom, oldestRev - 1);
+  }
+}
+
+/**
+ * A `reset` rebases the board: incremental deltas before it no longer compose,
+ * so any client still behind the reset must rebuild too. Clear the ring and
+ * raise `readyFrom` to the reset's revision (spec §3.2 "buffer miss → reset").
+ */
+function ringMarkReset(ring: DeltaRing, revision: number) {
+  ring.entries.length = 0;
+  ring.readyFrom = Math.max(ring.readyFrom, revision);
 }
 
 interface Active {
@@ -48,6 +99,18 @@ export interface BoardRuntime {
   select(slug: BoardSlug): BoardSnapshot | null;
   /** Latest cached snapshot for `slug`, or null. */
   snapshotOf(slug: BoardSlug): BoardSnapshot | null;
+  /**
+   * The board's current monotonic revision (spec §3.1) — 0 for a board the
+   * runtime has never polled a non-trivial change for.
+   */
+  currentRevision(slug: BoardSlug): number;
+  /**
+   * Resumable catch-up from a past `revision` (spec §3.2). When `since` falls
+   * inside the ring (no gap/eviction since) it replays exactly the deltas
+   * published after `since` without re-reading the DB; on a buffer miss, DB
+   * swap, or an unknown board it degrades to a `reset` full-snapshot rebuild.
+   */
+  deltasSince(slug: BoardSlug, since: number): DeltasSinceResult;
   /**
    * Full typed detail for one card on `slug` (spec §2 `CardDetail`), or null
    * when the board is missing/unreadable or the task id does not exist. Uses a
@@ -90,8 +153,13 @@ function tryOpen(slug: BoardSlug): Database | null {
 export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
   const hub = createSseHub();
   const pollIntervalMs = opts?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const ringCap = opts?.ringCap ?? DEFAULT_RING_CAP;
   const staleMs = resolveStaleMs();
   const snapshots = new Map<BoardSlug, BoardSnapshot>();
+  // Per-board revision counter + delta ring (spec §3.1, §3.2). These persist
+  // across board switches so a previously-polled board resumes from its cursor.
+  const revisions = new Map<BoardSlug, number>();
+  const rings = new Map<BoardSlug, DeltaRing>();
   let active: Active | null = null;
 
   /**
@@ -110,11 +178,32 @@ export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
     };
 
     const poller = createPoller(getDb, pollIntervalMs);
-    poller.onDelta((delta: PollerDelta) => {
+    poller.onDelta((batch: PollerDelta[]) => {
+      // A non-empty batch is exactly one non-trivial change → bump +1 (§3.1).
+      const newRev = (revisions.get(slug) ?? 0) + 1;
+      revisions.set(slug, newRev);
+
+      // Record resumable deltas in the ring; a reset rebases and is not stored.
+      const ring = rings.get(slug) ?? makeRing();
+      let sawReset = false;
+      for (const d of batch) {
+        if (d.kind === 'reset') {
+          sawReset = true;
+        } else {
+          ringPush(ring, newRev, d, ringCap);
+        }
+      }
+      if (sawReset) ringMarkReset(ring, newRev);
+      rings.set(slug, ring);
+
+      // Refresh the cached snapshot, stamped with the bumped revision.
       const handle = getDb();
       if (handle) {
         try {
-          snapshots.set(slug, readSnapshot(handle, { staleMs, now: Date.now() / 1000 }));
+          snapshots.set(
+            slug,
+            readSnapshot(handle, { staleMs, now: Date.now() / 1000, revision: newRev }),
+          );
         } catch {
           // Read failed (DB swapped under us). Drop the handle so the next tick
           // reopens it; the poller has already emitted a `reset`, which the hub
@@ -128,12 +217,14 @@ export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
         }
       }
       const snapshot = snapshots.get(slug);
-      if (delta.kind === 'reset') {
-        hub.publish(slug, delta, snapshot);
-      } else if (delta.kind === 'summary') {
-        hub.publish(slug, delta, snapshot?.summary);
-      } else {
-        hub.publish(slug, delta);
+      for (const d of batch) {
+        if (d.kind === 'reset') {
+          hub.publish(slug, d, snapshot);
+        } else if (d.kind === 'summary') {
+          hub.publish(slug, d, snapshot?.summary);
+        } else {
+          hub.publish(slug, d);
+        }
       }
     });
 
@@ -169,7 +260,10 @@ export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
       // Prime the cached snapshot synchronously so a just-connected client gets
       // an immediate `reset` rather than waiting for the first poll tick.
       try {
-        snapshots.set(slug, readSnapshot(db, { staleMs, now: Date.now() / 1000 }));
+        snapshots.set(
+          slug,
+          readSnapshot(db, { staleMs, now: Date.now() / 1000, revision: revisions.get(slug) ?? 0 }),
+        );
       } catch {
         /* unreadable — poller will emit a reset when it recovers */
       }
@@ -186,6 +280,20 @@ export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
   return {
     select,
     snapshotOf: (slug) => snapshots.get(slug) ?? null,
+    currentRevision: (slug) => revisions.get(slug) ?? 0,
+    deltasSince(slug, since) {
+      const rev = revisions.get(slug);
+      const snapshot = snapshots.get(slug) ?? null;
+      // Board never polled a non-trivial change — nothing resumable; rebuild.
+      if (rev === undefined) return { reset: true, snapshot };
+      // Client is current — idle, ~0 cost, no ring access.
+      if (since >= rev) return { revision: rev, deltas: [] };
+      // Buffer miss (eviction, interleaved reset) or unknown → full rebuild.
+      const ring = rings.get(slug);
+      if (!ring || since < ring.readyFrom) return { reset: true, snapshot };
+      const deltas = ring.entries.filter((e) => e.revision > since).map((e) => e.scope);
+      return { revision: rev, deltas };
+    },
     detailOf(slug, taskId) {
       const db = tryOpen(slug);
       if (!db) return null;

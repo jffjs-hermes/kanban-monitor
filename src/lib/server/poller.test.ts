@@ -70,7 +70,7 @@ describe('createPoller', () => {
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
     const poller: Poller = createPoller(() => db, 1000);
-    poller.onDelta((d) => deltas.push(d));
+    poller.onDelta((batch) => deltas.push(...batch));
     poller.start();
 
     // First tick: prev === null → reset.
@@ -103,7 +103,7 @@ describe('createPoller', () => {
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
     const poller: Poller = createPoller(() => db);
-    poller.onDelta((d) => deltas.push(d));
+    poller.onDelta((batch) => deltas.push(...batch));
     poller.start();
 
     deltas.length = 0; // clear the initial reset
@@ -119,7 +119,7 @@ describe('createPoller', () => {
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
     const poller: Poller = createPoller(() => db);
-    poller.onDelta((d) => deltas.push(d));
+    poller.onDelta((batch) => deltas.push(...batch));
     poller.start();
     deltas.length = 0;
 
@@ -134,7 +134,7 @@ describe('createPoller', () => {
     vi.useFakeTimers();
     const deltas: PollerDelta[] = [];
     const poller: Poller = createPoller(() => null);
-    poller.onDelta((d) => deltas.push(d));
+    poller.onDelta((batch) => deltas.push(...batch));
     poller.start();
     vi.advanceTimersByTime(4_000);
     expect(deltas).toEqual([]);
@@ -146,7 +146,7 @@ describe('createPoller', () => {
     const db = makeBoard(12);
     const deltas: PollerDelta[] = [];
     const poller: Poller = createPoller(() => db);
-    poller.onDelta((d) => deltas.push(d));
+    poller.onDelta((batch) => deltas.push(...batch));
     poller.start();
     deltas.length = 0;
 
