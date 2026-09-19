@@ -114,7 +114,7 @@
 <svelte:head><title>Kanban Board Monitor</title></svelte:head>
 
 <div class="mx-auto max-w-[1500px] p-7">
-  <header class="flex flex-wrap items-center justify-between gap-6 border-b border-default pb-[22px]">
+  <header class="flex flex-wrap items-center justify-between gap-6 pb-[22px]">
     <div class="brand">
       <h1 class="m-0 text-[26px]">Kanban Board Monitor</h1>
       <p class="mt-1.5 text-muted">Read-only live view of the Hermes team</p>
@@ -141,7 +141,7 @@
       {now}
       connected={$board.connected}
     />
-    <main class="flex min-w-0 flex-nowrap items-start gap-3.5 overflow-x-auto">
+    <main class="flex min-w-0 flex-nowrap items-stretch gap-3.5 overflow-x-auto">
       {#each COLUMN_DEFS as def (def.status)}
         {#if !def.collapsed || showMore}
           <BoardColumn
