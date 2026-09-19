@@ -99,6 +99,7 @@
   --color-success-tint: var(--success-tint);
   --color-danger-tint: var(--danger-tint);
   --animate-drawer-slide: drawer-slide 0.16s ease-out;
+  --animate-transition-pop: transition-pop 5s ease-out forwards;
 
   @keyframes drawer-slide {
     from {
@@ -109,6 +110,18 @@
       transform: none;
       opacity: 1;
     }
+  }
+
+  /* "→ status" flash on a just-transitioned board card (Impl task: annotate
+   * recent transitions). Pops in, holds, fades out across the 5s window. It is
+   * state-derived — the badge unmounts when the transition leaves the window,
+   * and replays on reload while the transition is still fresh. Timing is tied
+   * to the annotate window so the fade-out lands on the same boundary. */
+  @keyframes transition-pop {
+    0% { opacity: 0; transform: scale(0.85); }
+    8% { opacity: 1; transform: scale(1); }
+    72% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1); }
   }
 }
 

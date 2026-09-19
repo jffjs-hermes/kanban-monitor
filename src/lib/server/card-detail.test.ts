@@ -162,6 +162,8 @@ describe('readCardDetail', () => {
     expect(d.card.runCount).toBe(2);
     expect(d.card.lastOutcome).toBe('gave_up'); // most recent run
     expect(d.card.childIds).toEqual(['b']);
+    // Board flash field: most recent status move from the same fold.
+    expect(d.card.lastTransition).toEqual({ to: 'done', at: 2000 });
 
     // Runs filtered + ordered by id.
     expect(d.runs.map((r) => r.id)).toEqual([1, 2]);
@@ -190,6 +192,18 @@ describe('readCardDetail', () => {
     expect(d.card.parentIds).toEqual(['a']);
     // running card carries liveness + elapsed.
     expect(d.card.liveness).toBe('active');
+    db.close();
+  });
+
+  it('sets lastTransition from the latest status move (or null when none)', () => {
+    fixture = makeBoard();
+    const db = openReadonly(fixture!.dbPath);
+    // 'b' has only a `created` event → its last move is → todo at creation.
+    expect(readCardDetail(db, 'b', { staleMs: 90_000, now: 3000 })!.card.lastTransition)
+      .toEqual({ to: 'todo', at: 1500 });
+    // 'c' has no events at all → no last transition to annotate.
+    expect(readCardDetail(db, 'c', { staleMs: 90_000, now: 3000 })!.card.lastTransition)
+      .toBeNull();
     db.close();
   });
 

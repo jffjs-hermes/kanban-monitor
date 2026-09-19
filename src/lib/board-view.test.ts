@@ -9,10 +9,12 @@ import {
   groupByStatus,
   initialBoardState,
   PRIMARY_COLUMNS,
+  recentTransition,
   reduceBoard,
   sortByNewestFirst,
   sortCards,
   takeNewest,
+  TRANSITION_WINDOW_MS,
 } from './board-view';
 import type {
   BoardSnapshot,
@@ -34,6 +36,7 @@ function card(id: string, over: Partial<CardView> = {}): CardView {
     createdAt: 1_700_000_000,
     runCount: 0,
     lastOutcome: null,
+    lastTransition: null,
     parentIds: [],
     childIds: [],
     ...over,
@@ -251,5 +254,38 @@ describe('Impl 12 — per-column newest-first sort + limit', () => {
     const cards = [card('a', { createdAt: 1 })];
     expect(takeNewest(cards, 5)).toHaveLength(1);
     expect(takeNewest(cards, -1)).toHaveLength(0);
+  });
+});
+
+describe('Impl — recentTransition window derivation', () => {
+  // `at` is unix seconds (as stored in task_events); `now` is unix ms.
+  const at = 1_700_000_005; // 5s after the 1_700_000_000 epoch
+
+  it('returns null when the card has no recorded transition', () => {
+    expect(recentTransition(card('a'), 1_700_000_010_000)).toBeNull();
+  });
+
+  it('annotates a transition inside the window (incl. the exact boundary)', () => {
+    const c = card('a', { lastTransition: { to: 'review', at } });
+    expect(recentTransition(c, at * 1000)).toEqual({ to: 'review', at }); // age 0
+    expect(recentTransition(c, at * 1000 + TRANSITION_WINDOW_MS)).toEqual({ to: 'review', at }); // age == window
+    expect(recentTransition(c, at * 1000 + 4_000)).toEqual({ to: 'review', at });
+  });
+
+  it('clears once the transition ages out of the window', () => {
+    const c = card('a', { lastTransition: { to: 'review', at } });
+    expect(recentTransition(c, at * 1000 + TRANSITION_WINDOW_MS + 1)).toBeNull();
+    expect(recentTransition(c, at * 1000 + 10_000)).toBeNull();
+  });
+
+  it('ignores a transition timestamped in the future', () => {
+    const c = card('a', { lastTransition: { to: 'running', at: 1_700_000_010 } });
+    expect(recentTransition(c, at * 1000)).toBeNull(); // now is before the move
+  });
+
+  it('honors an explicit window override and survives a reload (state-derived)', () => {
+    const c = card('a', { lastTransition: { to: 'done', at } });
+    expect(recentTransition(c, at * 1000 + 3_000, 2_000)).toBeNull(); // outside custom window
+    expect(recentTransition(c, at * 1000 + 1_500, 2_000)).toEqual({ to: 'done', at });
   });
 });
