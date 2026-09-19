@@ -68,6 +68,25 @@ export function sortCards(cards: CardView[]): CardView[] {
   );
 }
 
+/**
+ * Newest-first ordering used within a column (Impl 12): card creation time
+ * descending so the most recently created card sits at the top. This is
+ * independent of the snapshot-wide status/priority/age sort — it's the
+ * per-column view ordering the column limit slices against.
+ */
+export function sortByNewestFirst(cards: CardView[]): CardView[] {
+  return [...cards].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Default number of newest cards shown per column before the toggle (Impl 12). */
+export const DEFAULT_COLUMN_LIMIT = 10;
+
+/** Slice a newest-first column list down to its first `limit` cards (Impl 12).
+ * Pure view concern — the caller decides whether the rest is revealed. */
+export function takeNewest(cards: CardView[], limit: number = DEFAULT_COLUMN_LIMIT): CardView[] {
+  return cards.slice(0, Math.max(0, limit));
+}
+
 function reconcile(
   snapshot: BoardSnapshot,
   upserts: CardView[],
@@ -203,10 +222,12 @@ export const PRIMARY_COLUMNS: TaskStatus[] = [
 ];
 
 /** Group a snapshot's cards into per-status lists keyed by status. Every
- * status is always present (empty when it has no cards). */
+ * status is always present (empty when it has no cards). Cards within each
+ * column are ordered newest-first (Impl 12) so the column limit shows the
+ * most recently created cards by default. */
 export function groupByStatus(cards: CardView[]): Record<TaskStatus, CardView[]> {
   const groups = {} as Record<TaskStatus, CardView[]>;
   for (const st of Object.keys(STATUS_ORDER) as TaskStatus[]) groups[st] = [];
-  for (const c of cards) groups[c.status]!.push(c);
+  for (const c of sortByNewestFirst(cards)) groups[c.status]!.push(c);
   return groups;
 }
