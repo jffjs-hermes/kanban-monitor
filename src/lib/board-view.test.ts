@@ -5,11 +5,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   COLUMN_DEFS,
+  DEFAULT_COLUMN_LIMIT,
   groupByStatus,
   initialBoardState,
   PRIMARY_COLUMNS,
   reduceBoard,
+  sortByNewestFirst,
   sortCards,
+  takeNewest,
 } from './board-view';
 import type {
   BoardSnapshot,
@@ -202,5 +205,51 @@ describe('column formation helpers', () => {
     ];
     const s = sortCards(cards).map((c) => c.id);
     expect(s).toEqual(['new-high', 'mid', 'old-low', 'running-one']);
+  });
+});
+
+describe('Impl 12 — per-column newest-first sort + limit', () => {
+  it('orders a column newest-first by created_at regardless of input order', () => {
+    const cards: CardView[] = [
+      card('oldest', { status: 'ready', createdAt: 100 }),
+      card('newest', { status: 'ready', createdAt: 300 }),
+      card('middle', { status: 'ready', createdAt: 200 }),
+    ];
+    expect(sortByNewestFirst(cards).map((c) => c.id)).toEqual(['newest', 'middle', 'oldest']);
+  });
+
+  it('groups each column newest-first (does not rely on array order)', () => {
+    const cards: CardView[] = [
+      card('o', { status: 'ready', createdAt: 100 }),
+      card('n', { status: 'ready', createdAt: 300 }),
+      card('m', { status: 'ready', createdAt: 200 }),
+      card('run-old', { status: 'running', createdAt: 50 }),
+      card('run-new', { status: 'running', createdAt: 400 }),
+    ];
+    const g = groupByStatus(cards);
+    expect(g.ready!.map((c) => c.id)).toEqual(['n', 'm', 'o']);
+    expect(g.running!.map((c) => c.id)).toEqual(['run-new', 'run-old']);
+  });
+
+  it('slices a column down to the newest N cards by default', () => {
+    const cards: CardView[] = Array.from({ length: 25 }, (_, i) =>
+      card(`c${i}`, { status: 'ready', createdAt: 1_000 + i }),
+    );
+    // Callers pass a newest-first list (from groupByStatus); slice keeps the newest 10.
+    const limit = takeNewest(sortByNewestFirst(cards));
+    expect(limit).toHaveLength(DEFAULT_COLUMN_LIMIT);
+    expect(limit).toHaveLength(10);
+    expect(limit.map((c) => c.id)).toEqual(Array.from({ length: 10 }, (_, i) => `c${24 - i}`)); // newest 10
+  });
+
+  it('leaves a column with ≤10 cards untouched', () => {
+    const cards = [card('a', { createdAt: 3 }), card('b', { createdAt: 2 }), card('c', { createdAt: 1 })];
+    expect(takeNewest(cards).map((c) => c.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('takeNewest never grows a list and clamps a negative limit', () => {
+    const cards = [card('a', { createdAt: 1 })];
+    expect(takeNewest(cards, 5)).toHaveLength(1);
+    expect(takeNewest(cards, -1)).toHaveLength(0);
   });
 });
