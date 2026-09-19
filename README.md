@@ -110,3 +110,52 @@ Health check: `curl -s http://localhost:8787/api/boards.json`.
 - **Resilience** — a missing/swapped board file is tolerated (the poller
   reopens it next tick); an empty board renders an empty state rather than
   erroring.
+
+## Agent API (MCP + REST)
+
+The same process exposes the derived board view to agents and scripts over two
+read-only surfaces, both backed by the shared `boardRuntime` (one poller, one
+delta ring — no separate process, no double DB read):
+
+- **MCP (Streamable HTTP)** at `POST /mcp` — the primary agent interface.
+  Native tools:
+  - `list_boards()` → `BoardSlug[]`
+  - `read_board(slug?)` → full `BoardSnapshot` (summary + cards, incl. `revision`)
+  - `list_changes(slug?, since)` → `{ revision, changes }` — resumable cursor
+    poll; `since=0`/omitted → full snapshot-init reset, `since=REV` → only the
+    deltas after `REV`, buffer miss → clean `reset`
+  - `get_card(slug?, id)` → `CardDetail` (runs, comments, transitions, body, PR metadata)
+  Optional read-only resources: `board://{slug}/snapshot` and
+  `board://{slug}/card/{id}`.
+- **REST** at `/api/agent/board/[slug]/changes?since=` (resumable cursor) and
+  `/api/agent/board/[slug]/cards?assignee=&stalled=` (filtered query) for
+  scripts/curl.
+
+Both surfaces are read-only in this increment (observe, don't mutate) and bind
+as the REST surface does today (no auth yet — deferred).
+
+### Agent watcher loop (spec §4.4)
+
+An agent can poll cheaply and resumably from `revision` to `revision` and react
+to stalls / review-assignee changes with no direct DB access:
+
+```ts
+// Pseudocode — MCP client calling list_changes on the kanban-monitor process.
+let rev = 0;
+while (true) {
+  const { revision, changes } = await mcp.list_changes({ slug: 'kanban-monitor', since: rev });
+  for (const c of changes) {
+    if (c.kind === 'cards') {
+      for (const card of c.upserts) {
+        if (card.liveness === 'stalled') notifyOperator(card);      // heartbeat overdue
+        if (card.status === 'review' && card.assignee === me) act(); // my review turn
+      }
+    }
+    if (c.kind === 'summary' && c.summary?.stalledCount > 0) flag();
+  }
+  rev = revision;   // advance the cursor — no gaps, no dups
+  await sleep(2_000);
+}
+```
+
+The equivalent REST poll is `curl -s 'http://localhost:8787/api/agent/board/kanban-monitor/changes?since=0'`.
