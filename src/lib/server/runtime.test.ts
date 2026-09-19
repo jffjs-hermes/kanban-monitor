@@ -9,6 +9,7 @@ import { Database } from 'bun:sqlite';
 
 import { createBoardRuntime } from './runtime';
 import type { BoardEvent } from './sse-hub';
+import type { CardView, DeltaScope } from '../types';
 
 const SCHEMA = `
 CREATE TABLE tasks (
@@ -165,5 +166,79 @@ describe('BoardRuntime', () => {
     const again = rt.select('default');
     expect(again?.cards.map((c) => c.title)).toEqual(['x']);
     expect(boardEvents).toEqual([]);
+  });
+});
+
+describe('BoardRuntime revision + delta ring (spec §3)', () => {
+  function resetOf(r: unknown): boolean {
+    return (r as { reset?: boolean }).reset === true;
+  }
+
+  it('starts at revision 1 after the initial reset and stays flat on idle polls', () => {
+    createBoard(join(home, 'kanban.db'), ['one']);
+    const rt = createBoardRuntime();
+    expect(rt.currentRevision('default')).toBe(0); // unselected board
+
+    rt.select('default');
+    expect(rt.currentRevision('default')).toBe(1); // initial reset bumped +1
+    expect(rt.snapshotOf('default')?.revision).toBe(1);
+
+    // Idle/no-change polls do NOT bump the revision.
+    vi.advanceTimersByTime(5_000);
+    expect(rt.currentRevision('default')).toBe(1);
+
+    // A client at the current cursor is fully caught up (idle, ~0 cost).
+    expect(rt.deltasSince('default', 1)).toEqual({ revision: 1, deltas: [] });
+  });
+
+  it('bumps exactly +1 per non-trivial change and replays only deltas after a cursor', () => {
+    createBoard(join(home, 'kanban.db'), ['one']);
+    const rt = createBoardRuntime();
+    rt.select('default'); // initial reset → rev 1
+
+    // A single card add produces summary + cards + card scopes in ONE tick.
+    addTask(join(home, 'kanban.db'), 'c1', 'one more');
+    vi.advanceTimersByTime(1000);
+    expect(rt.currentRevision('default')).toBe(2);
+
+    const res = rt.deltasSince('default', 1);
+    expect(resetOf(res)).toBe(false);
+    expect((res as { revision: number }).revision).toBe(2);
+    const served = (res as { deltas: DeltaScope[] }).deltas;
+    const cards = served.find((d) => d.kind === 'cards') as { upserts: CardView[] };
+    expect(cards.upserts.some((c) => c.id === 'c1')).toBe(true);
+
+    // Re-querying the same cursor is idempotent — nothing new.
+    expect(rt.deltasSince('default', 2)).toEqual({ revision: 2, deltas: [] });
+  });
+
+  it('serves since=0 as a full-snapshot reset (init semantics)', () => {
+    createBoard(join(home, 'kanban.db'), ['x']);
+    const rt = createBoardRuntime();
+    rt.select('default');
+    expect(resetOf(rt.deltasSince('default', 0))).toBe(true);
+  });
+
+  it('ring eviction raises the floor → deltasSince behind the ring resets', () => {
+    createBoard(join(home, 'kanban.db'), ['a']);
+    const rt = createBoardRuntime({ ringCap: 2 });
+    rt.select('default'); // initial reset → rev 1
+
+    for (let i = 0; i < 5; i++) {
+      addTask(join(home, 'kanban.db'), 'ev' + i, 'ev' + i);
+      vi.advanceTimersByTime(1000);
+    }
+    expect(rt.currentRevision('default')).toBe(6); // 5 more non-trivial ticks
+
+    // Far enough back that the ring evicted those revisions → must rebuild.
+    expect(resetOf(rt.deltasSince('default', 1))).toBe(true);
+    // A cursor still inside the retained ring is served, not reset.
+    expect(resetOf(rt.deltasSince('default', 5))).toBe(false);
+  });
+
+  it('unknown board → reset with a null snapshot and revision 0', () => {
+    const rt = createBoardRuntime();
+    expect(rt.currentRevision('nope')).toBe(0);
+    expect(rt.deltasSince('nope', 0)).toEqual({ reset: true, snapshot: null });
   });
 });

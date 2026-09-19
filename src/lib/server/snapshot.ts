@@ -19,6 +19,12 @@ import type {
 export interface SnapshotOptions {
   staleMs: number; // heartbeat staleness threshold (spec §5, default 90_000)
   now: number; // unix seconds — "current time" for this snapshot
+  /**
+   * Board revision this snapshot represents (spec §3.1). Stamped by the caller
+   * (the runtime owns the counter); defaults to 0 when the caller has no
+   * revision yet (pre-first-delta primes).
+   */
+  revision?: number;
 }
 
 const STATUS_ORDER: Record<TaskStatus, number> = {
@@ -101,7 +107,7 @@ export function readSnapshot(db: Database, opts: SnapshotOptions): BoardSnapshot
   for (const c of cards) c.runCount = runCount.get(c.id) ?? 0;
 
   const summary = buildSummary(cards, opts.now * 1000);
-  return { slug, summary, cards };
+  return { slug, summary, cards, revision: opts.revision ?? 0 };
 }
 
 function buildSummary(cards: CardView[], nowMs: number): BoardSummary {

@@ -44,7 +44,7 @@ function summary(over: Partial<BoardSummary> = {}): BoardSummary {
 }
 
 function snap(slug: string, cards: CardView[], over: Partial<BoardSummary> = {}): BoardSnapshot {
-  return { slug, summary: summary(over), cards };
+  return { slug, summary: summary(over), cards, revision: 0 };
 }
 
 function cardsScope(scopes: any[]) {

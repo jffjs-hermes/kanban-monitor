@@ -18,7 +18,13 @@ export type PollerDelta = DeltaScope & { slug: BoardSlug };
 export interface Poller {
   start(): void;
   stop(): void;
-  onDelta(cb: (delta: PollerDelta) => void): void;
+  /**
+   * Subscribe to a tick's deltas. Called ONCE per tick, with the full batch of
+   * scopes that tick produced (empty ticks are NOT emitted), so the runtime can
+   * treat a non-empty batch as exactly one non-trivial change to bump the board
+   * revision by +1 (spec §3.1). `PollerDelta` carries the slug for routing.
+   */
+  onDelta(cb: (deltas: PollerDelta[]) => void): void;
 }
 
 /** Default tick interval (spec §5 `POLL_INTERVAL_MS`). */
@@ -36,10 +42,10 @@ export function createPoller(
   // Board slug this poller serves, resolved from the first successful snapshot
   // read (the handle itself carries it). Fallback during a first-tick failure.
   let knownSlug: BoardSlug = 'default';
-  const listeners = new Set<(delta: PollerDelta) => void>();
+  const listeners = new Set<(deltas: PollerDelta[]) => void>();
 
-  const emit = (delta: PollerDelta) => {
-    for (const cb of listeners) cb(delta);
+  const emit = (deltas: PollerDelta[]) => {
+    for (const cb of listeners) cb(deltas);
   };
 
   const tick = () => {
@@ -55,13 +61,15 @@ export function createPoller(
     } catch {
       // Read failed (DB swapped under us). Drop state and signal a full resend.
       prev = null;
-      emit({ kind: 'reset', slug: knownSlug });
+      emit([{ kind: 'reset', slug: knownSlug }]);
       return;
     }
     knownSlug = next.slug;
     const deltas = diffSnapshot(prev, next);
     prev = next;
-    for (const d of deltas) emit({ ...d, slug: next.slug });
+    // A tick that produced no scopes is trivial — emit nothing (no revision bump).
+    if (deltas.length === 0) return;
+    emit(deltas.map((d) => ({ ...d, slug: next.slug })));
   };
 
   return {
