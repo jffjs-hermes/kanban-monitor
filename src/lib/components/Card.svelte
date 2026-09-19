@@ -7,7 +7,8 @@
   // client-side by adding the elapsed since `frameAt` (spec §2.1: the server
   // does not push per-second elapsed updates).
   import LivenessDot from './LivenessDot.svelte';
-  import type { CardView } from '../types';
+  import { recentTransition } from '../board-view';
+  import type { CardView, TaskStatus } from '../types';
 
   let {
     card,
@@ -56,6 +57,17 @@
   // Only meaningful while the card is running.
   const startedMs = (): number | null =>
     card.elapsedMs !== null ? frameAt - card.elapsedMs : null;
+
+  // "Just transitioned" annotation: shown only while the card's most recent
+  // status move is inside the window of the ticking client clock (`now`).
+  // Derived from state (card.lastTransition vs now), so it survives a reload
+  // and clears itself as the window passes — no imperative per-event flash.
+  const ann = $derived(recentTransition(card, now));
+
+  const STATUS_LABEL: Record<TaskStatus, string> = {
+    triage: 'triage', todo: 'todo', ready: 'ready', running: 'running',
+    review: 'review', blocked: 'blocked', done: 'done', archived: 'archived',
+  };
 </script>
 
 <article
@@ -80,6 +92,15 @@
       />
     {/if}
   </div>
+  {#if ann}
+    <div
+      class="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold animate-transition-pop"
+      role="status"
+    >
+      <span class="size-1.5 rounded-full bg-accent" aria-hidden="true"></span>
+      <span class="text-link">→ {STATUS_LABEL[ann.to]}</span>
+    </div>
+  {/if}
   <div class="mt-2.5 flex flex-wrap gap-2.5 text-[12px] text-muted">
     {#if card.assignee}<span class="text-link-soft">{card.assignee}</span>{/if}
     <span class="rounded-[10px] border border-default bg-surface px-[7px]">p{card.priority}</span>

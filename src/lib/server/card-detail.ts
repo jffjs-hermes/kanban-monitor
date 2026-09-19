@@ -93,9 +93,29 @@ export function deriveTransitions(events: EventRow[]): CardDetail['transitions']
   return out;
 }
 
+/**
+ * The card's most recent status move, as the board card flash needs it:
+ * `{ to, at }` of the last transition in the trail, or `null` when the card
+ * has no recorded status move. Reuses the same deriveTransitions fold as the
+ * drawer trail (locked decision §1) so the board annotation and the drawer
+ * always agree on what counts as a transition.
+ */
+export function lastTransitionOf(events: EventRow[]): CardView['lastTransition'] {
+  const trail = deriveTransitions(events);
+  if (trail.length === 0) return null;
+  const last = trail[trail.length - 1];
+  return { to: last.to, at: last.at };
+}
+
 /** One card's view model, mirroring `snapshot.ts` derivation but for a single
  * card (and including archived cards). */
-function buildCard(task: TaskRow, runs: CardDetail['runs'], links: TaskLinkRow[], opts: SnapshotOptions): CardView {
+function buildCard(
+  task: TaskRow,
+  runs: CardDetail['runs'],
+  links: TaskLinkRow[],
+  opts: SnapshotOptions,
+  lastTransition: CardView['lastTransition'],
+): CardView {
   const taskRuns = runs
     .filter((r) => r.task_id === task.id)
     .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
@@ -122,6 +142,7 @@ function buildCard(task: TaskRow, runs: CardDetail['runs'], links: TaskLinkRow[]
     createdAt: task.created_at,
     runCount,
     lastOutcome,
+    lastTransition,
     parentIds: parents,
     childIds: children,
   };
@@ -142,7 +163,7 @@ export function readCardDetail(
   const task = tasks.find((t) => t.id === taskId);
   if (!task) return null;
 
-  const card = buildCard(task, runs, links, opts);
+  const card = buildCard(task, runs, links, opts, lastTransitionOf(events.filter((e) => e.task_id === taskId)));
   const transitions = deriveTransitions(events.filter((e) => e.task_id === taskId));
   const taskRuns = runs
     .filter((r) => r.task_id === taskId)

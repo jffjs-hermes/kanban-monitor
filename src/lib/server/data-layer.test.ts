@@ -238,6 +238,7 @@ describe('snapshot', () => {
     expect(t1.elapsedMs).toBe((now - (now - 80)) * 1000);
     expect(t1.runCount).toBe(2); // two runs
     expect(t1.lastOutcome).toBe('gave_up'); // most recent run (id 2) outcome
+    expect(t1.lastTransition).toEqual({ to: 'running', at: now - 300 }); // claimed event
     expect(t1.childIds).toEqual(['t2', 't3']);
 
     expect(byId['t2'].liveness).toBe('stalled');

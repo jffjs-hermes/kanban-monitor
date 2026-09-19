@@ -7,6 +7,7 @@
 import { boardDbPath, readBoardRows } from './data-access';
 import { slugFromPath } from './board-discover';
 import { classify } from './liveness';
+import { lastTransitionOf } from './card-detail';
 import type { Database } from 'bun:sqlite';
 import type {
   BoardSnapshot,
@@ -38,8 +39,14 @@ const STATUS_ORDER: Record<TaskStatus, number> = {
   archived: 7,
 };
 
-function toCard(task: TaskRow, opts: SnapshotOptions, lastOutcome: string | null,
-  parentIds: string[], childIds: string[]): CardView {
+function toCard(
+  task: TaskRow,
+  opts: SnapshotOptions,
+  lastOutcome: string | null,
+  parentIds: string[],
+  childIds: string[],
+  lastTransition: CardView['lastTransition'],
+): CardView {
   const running = task.status === 'running';
   return {
     id: task.id,
@@ -52,6 +59,7 @@ function toCard(task: TaskRow, opts: SnapshotOptions, lastOutcome: string | null
     createdAt: task.created_at,
     runCount: 0, // filled by caller
     lastOutcome,
+    lastTransition,
     parentIds,
     childIds,
   };
@@ -65,7 +73,7 @@ function toCard(task: TaskRow, opts: SnapshotOptions, lastOutcome: string | null
  */
 export function readSnapshot(db: Database, opts: SnapshotOptions): BoardSnapshot {
   const slug = slugFromPath(boardDbPath(db));
-  const { tasks: taskRows, runs, links } = readBoardRows(db);
+  const { tasks: taskRows, runs, events, links } = readBoardRows(db);
 
   // Latest attempt outcome per task (most recent run wins for stable results).
   const lastOutcome: Map<string, string | null> = new Map();
@@ -84,6 +92,19 @@ export function readSnapshot(db: Database, opts: SnapshotOptions): BoardSnapshot
     parents.set(l.child_id, [...(parents.get(l.child_id) ?? []), l.parent_id]);
   }
 
+  // Most recent status move per task, from the same event fold the drawer
+  // uses (locked decision §1). Grouped once so each card derives cheaply.
+  const lastTransitions = new Map<string, CardView['lastTransition']>();
+  {
+    const byTask = new Map<string, typeof events>();
+    for (const e of events) {
+      const arr = byTask.get(e.task_id);
+      if (arr) arr.push(e);
+      else byTask.set(e.task_id, [e]);
+    }
+    for (const [id, evs] of byTask) lastTransitions.set(id, lastTransitionOf(evs));
+  }
+
   // Non-archived cards, sorted status → priority (desc) → age (asc).
   const cards = taskRows
     .filter((t) => t.status !== 'archived')
@@ -100,6 +121,7 @@ export function readSnapshot(db: Database, opts: SnapshotOptions): BoardSnapshot
         lastOutcome.get(t.id) ?? null,
         parents.get(t.id) ?? [],
         children.get(t.id) ?? [],
+        lastTransitions.get(t.id) ?? null,
       ),
     );
 

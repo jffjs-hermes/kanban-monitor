@@ -86,6 +86,7 @@ export interface CardView {
   createdAt: number;
   runCount: number; // attempts, from task_runs
   lastOutcome: string | null;
+  lastTransition: { to: TaskStatus; at: number } | null; // most recent status move
   parentIds: string[];
   childIds: string[];
 }

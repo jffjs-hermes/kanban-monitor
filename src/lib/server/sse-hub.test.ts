@@ -94,6 +94,7 @@ describe('wire framing (§4)', () => {
   const fakeCardView = {
     id: 't1', title: 'T', assignee: null, priority: 0, status: 'todo' as const,
     liveness: null, elapsedMs: null, createdAt: 1, runCount: 0, lastOutcome: null,
+    lastTransition: null,
     parentIds: [] as string[], childIds: [] as string[],
   };
   const fakeSummary = {

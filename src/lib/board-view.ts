@@ -13,6 +13,30 @@ import type {
   TaskStatus,
 } from './types';
 
+/** How long a just-transitioned card keeps its "→ status" annotation (ms).
+ * Derived from state: the annotation is shown whenever the card's latest
+ * transition is within this window of the client's clock (`now`), so it's
+ * correct on reload and clears itself as the window passes on the next tick
+ * (locked decision §2/§3 — no imperative per-event flash that can be missed). */
+export const TRANSITION_WINDOW_MS = 5_000;
+
+/**
+ * The card's most recent status move iff it happened within `windowMs` of
+ * `nowMs` (the ticking client clock, unix ms). Pure window derivation for the
+ * board annotation: `card.lastTransition.at` is unix seconds, so it converts
+ * here. Returns `null` when the card has no transition or it has aged out.
+ */
+export function recentTransition(
+  card: CardView,
+  nowMs: number,
+  windowMs: number = TRANSITION_WINDOW_MS,
+): { to: TaskStatus; at: number } | null {
+  const lt = card.lastTransition;
+  if (!lt) return null;
+  const ageMs = nowMs - lt.at * 1000;
+  return ageMs >= 0 && ageMs <= windowMs ? lt : null;
+}
+
 /** Wire event names the reducer understands (§4). */
 export type BoardEventName =
   | 'hello'

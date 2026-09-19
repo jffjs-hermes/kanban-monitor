@@ -17,6 +17,7 @@ function card(id: string, over: Partial<CardView> = {}): CardView {
     createdAt: 0,
     runCount: 0,
     lastOutcome: null,
+    lastTransition: null,
     parentIds: [],
     childIds: [],
     ...over,
