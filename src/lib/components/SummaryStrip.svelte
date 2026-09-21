@@ -52,7 +52,7 @@
   });
 </script>
 
-<div class="border-b border-default py-5">
+<div class="border-t border-default py-5">
   <div class="flex flex-wrap items-center gap-2.5">
     {#each TILES as st (st)}
       <span class="rounded-md border border-default bg-surface px-3 py-2 text-[13px] text-muted" data-status={st}>
