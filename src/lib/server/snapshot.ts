@@ -7,6 +7,7 @@
 import { boardDbPath, readBoardRows } from './data-access';
 import { slugFromPath } from './board-discover';
 import { classify } from './liveness';
+import { deriveAgentHealth } from './agent-health';
 import { lastTransitionOf } from './card-detail';
 import type { Database } from 'bun:sqlite';
 import type {
@@ -129,7 +130,8 @@ export function readSnapshot(db: Database, opts: SnapshotOptions): BoardSnapshot
   for (const c of cards) c.runCount = runCount.get(c.id) ?? 0;
 
   const summary = buildSummary(cards, opts.now * 1000);
-  return { slug, summary, cards, revision: opts.revision ?? 0 };
+  const health = deriveAgentHealth(taskRows, runs, opts.now, opts.staleMs);
+  return { slug, summary, cards, health, revision: opts.revision ?? 0 };
 }
 
 function buildSummary(cards: CardView[], nowMs: number): BoardSummary {

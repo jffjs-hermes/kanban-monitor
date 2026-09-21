@@ -55,7 +55,7 @@ function summary(over: Partial<BoardSummary> = {}): BoardSummary {
 }
 
 function snapshot(slug = 'default', cards: CardView[] = [], over: Partial<BoardSnapshot> = {}): BoardSnapshot {
-  return { slug, cards, summary: summary(), revision: 0, ...over };
+  return { slug, cards, summary: summary(), revision: 0, ...over, health: over.health ?? [] };
 }
 
 describe('reduceBoard — realtime sequence', () => {

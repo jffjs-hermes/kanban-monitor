@@ -11,6 +11,7 @@
   import { COLUMN_DEFS, groupByStatus } from '$lib/board-view';
   import BoardColumn from '$lib/components/BoardColumn.svelte';
   import SummaryStrip from '$lib/components/SummaryStrip.svelte';
+  import AgentHealthPanel from '$lib/components/AgentHealthPanel.svelte';
   import BoardSwitcher from '$lib/components/BoardSwitcher.svelte';
   import { get } from 'svelte/store';
   import type { BoardSlug } from '$lib/types';
@@ -140,6 +141,11 @@
       seq={$board.seq}
       {now}
       connected={$board.connected}
+    />
+    <AgentHealthPanel
+      health={$board.snapshot.health}
+      lastSyncedAtMs={$board.snapshot.summary.lastSyncedAt}
+      {now}
     />
     <main class="flex min-w-0 flex-nowrap items-stretch gap-3.5 overflow-x-auto">
       {#each COLUMN_DEFS as def (def.status)}
