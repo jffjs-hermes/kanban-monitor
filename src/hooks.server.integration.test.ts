@@ -26,7 +26,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { handle } from './hooks.server';
-import { setAgentTokenForTest } from '$lib/server/agent-auth';
+import { setAgentHostForTest, setAgentTokenForTest } from '$lib/server/agent-auth';
 import { GET as changesGET } from './routes/api/agent/board/[slug]/changes/+server';
 import { GET as cardsGET } from './routes/api/agent/board/[slug]/cards/+server';
 import { GET as boardsGET } from './routes/api/boards.json/+server';
@@ -70,11 +70,16 @@ beforeEach(() => {
   process.env.HERMES_HOME = home;
   process.env.STALE_WORKER_MS = '90000';
   setAgentTokenForTest(undefined);
+  // Developer default: loopback bind, so the unset-token default-open tests in
+  // this file exercise the intended loopback-open developer behaviour. The
+  // non-loopback default-DENY scenarios override the host per-case.
+  setAgentHostForTest('127.0.0.1');
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
   setAgentTokenForTest(undefined);
+  setAgentHostForTest('0.0.0.0');
   vi.useRealTimers();
   if (envBackup.HERMES_HOME === undefined) delete process.env.HERMES_HOME;
   else process.env.HERMES_HOME = envBackup.HERMES_HOME;
@@ -174,7 +179,7 @@ async function callHandle(
 }
 
 describe('integration: agent REST routes through the AGENT_TOKEN gate', () => {
-  it('default-open: /changes succeeds with no credentials when AGENT_TOKEN unset', async () => {
+  it('loopback-open: /changes succeeds with no credentials when AGENT_TOKEN unset on a loopback bind', async () => {
     const slug = freshSlug();
     createBoard(slug, [{ id: 'a', title: 'alpha' }]);
     const { res, calls } = await callHandle(`/api/agent/board/${slug}/changes?since=0`);
@@ -186,7 +191,7 @@ describe('integration: agent REST routes through the AGENT_TOKEN gate', () => {
     ]);
   });
 
-  it('default-open: /cards succeeds with no credentials when AGENT_TOKEN unset', async () => {
+  it('loopback-open: /cards succeeds with no credentials when AGENT_TOKEN unset on a loopback bind', async () => {
     const slug = freshSlug();
     createBoard(slug, [{ id: 'a', title: 'alpha' }, { id: 'b', title: 'beta' }]);
     const { res, calls } = await callHandle(`/api/agent/board/${slug}/cards`);
@@ -261,6 +266,17 @@ describe('integration: agent REST routes through the AGENT_TOKEN gate', () => {
     const changes = await callHandle(`/api/agent/board/${slug}/changes?since=0`, { token: 'cfg' });
     expect(changes.res.status).toBe(401);
     expect(changes.calls).toHaveLength(0);
+  });
+
+  it('non-loopback deny: unset AGENT_TOKEN on a non-loopback bind returns 401 before the route', async () => {
+    const slug = freshSlug();
+    createBoard(slug, [{ id: 'a', title: 'alpha' }]);
+    setAgentHostForTest('0.0.0.0');
+    const { res, calls } = await callHandle(`/api/agent/board/${slug}/changes?since=0`);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
+    expect(calls).toHaveLength(0); // gate short-circuits before the route
   });
 });
 

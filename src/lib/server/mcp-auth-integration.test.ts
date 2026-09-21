@@ -19,7 +19,7 @@ import './mcp-auth-test-env';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handle } from '../../hooks.server';
 import { handleMcpRequest } from './mcp';
-import { setAgentTokenForTest } from './agent-auth';
+import { setAgentHostForTest, setAgentTokenForTest } from './agent-auth';
 
 const BASE = 'http://test/mcp';
 const PROTO = '2025-06-18';
@@ -97,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setAgentTokenForTest(undefined);
+  setAgentHostForTest('127.0.0.1');
   vi.restoreAllMocks();
 });
 
@@ -215,8 +216,9 @@ describe('MCP Streamable HTTP auth gate (real hook → handleMcpRequest)', () =>
     expect(after.status).toBe(404);
   });
 
-  it('default-opens when AGENT_TOKEN is unset: initialize works with no credentials', async () => {
+  it('loopback-open: initialize works with no credentials when AGENT_TOKEN unset on a loopback bind', async () => {
     setAgentTokenForTest(undefined);
+    setAgentHostForTest('127.0.0.1');
     const res = await gate(post(initMsg));
     expect(res.status).toBe(200);
     const sid = res.headers.get('mcp-session-id');
@@ -224,5 +226,16 @@ describe('MCP Streamable HTTP auth gate (real hook → handleMcpRequest)', () =>
     // Cleanup via a tokenless DELETE (open mode) so no session leaks between tests.
     const bye = await gate(del({ 'mcp-session-id': sid! }));
     expect(bye.status).toBe(200);
+  });
+
+  it('non-loopback deny: initialize returns 401 with no token when AGENT_TOKEN unset on a non-loopback bind (spec §6.4)', async () => {
+    setAgentTokenForTest(undefined);
+    setAgentHostForTest('0.0.0.0');
+    const res = await gate(post(initMsg));
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
+    // A denied initialize cannot mint a session.
+    expect(res.headers.get('mcp-session-id')).toBeNull();
   });
 });
