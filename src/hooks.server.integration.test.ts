@@ -29,6 +29,7 @@ import { handle } from './hooks.server';
 import { setAgentHostForTest, setAgentTokenForTest } from '$lib/server/agent-auth';
 import { GET as changesGET } from './routes/api/agent/board/[slug]/changes/+server';
 import { GET as cardsGET } from './routes/api/agent/board/[slug]/cards/+server';
+import { GET as transcriptGET } from './routes/api/agent/board/[slug]/cards/[id]/transcript/+server';
 import { GET as boardsGET } from './routes/api/boards.json/+server';
 import type { RequestEvent } from '@sveltejs/kit';
 
@@ -148,6 +149,15 @@ function makeResolve() {
       return cardsGET(ev);
     }
 
+    const transcriptMatch = new RegExp(
+      `^/api/agent/board/${SLUG_PARTIAL}/cards/([^/]+)/transcript$`,
+    ).exec(p);
+    if (transcriptMatch) {
+      calls.push(p);
+      const ev = { url: u, params: { slug: transcriptMatch[1], id: transcriptMatch[2] } } as unknown as RequestEvent;
+      return transcriptGET(ev);
+    }
+
     if (p === '/api/boards.json') {
       calls.push(p);
       return boardsGET();
@@ -199,6 +209,44 @@ describe('integration: agent REST routes through the AGENT_TOKEN gate', () => {
     expect(calls).toHaveLength(1);
     const ids = (await res.json()).map((c: { id: string }) => c.id).sort();
     expect(ids).toEqual(['a', 'b']);
+  });
+
+  it('transcript is gated identically: valid token reaches the handler, missing/wrong is 401 short-circuit', async () => {
+    const slug = freshSlug();
+    createBoard(slug, [{ id: 'x', title: 'xx' }]);
+    // Valid token → the handler runs (route reached). The fixture card has no
+    // run/session, so it returns 200 with a graceful empty transcript — the
+    // gate did NOT short-circuit.
+    const ok = await callHandle(`/api/agent/board/${slug}/cards/x/transcript?token=cfg`, { token: 'cfg' });
+    expect(ok.res.status).toBe(200);
+    expect(ok.calls).toHaveLength(1);
+    const body = (await ok.res.json()) as { events: unknown[]; hasTranscript: boolean };
+    expect(body.events).toEqual([]);
+    expect(body.hasTranscript).toBe(false);
+
+    const missing = await callHandle(`/api/agent/board/${slug}/cards/x/transcript`, { token: 'cfg' });
+    expect(missing.res.status).toBe(401);
+    expect(missing.res.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await missing.res.json()).toEqual({ error: 'unauthorized' });
+    expect(missing.calls).toHaveLength(0);
+
+    const wrong = await callHandle(`/api/agent/board/${slug}/cards/x/transcript`, {
+      token: 'cfg',
+      headers: { authorization: 'Bearer not-the-token' },
+    });
+    expect(wrong.res.status).toBe(401);
+    expect(wrong.calls).toHaveLength(0);
+  });
+
+  it('non-loopback deny: the transcript route 401s when AGENT_TOKEN is unset on a non-loopback bind', async () => {
+    const slug = freshSlug();
+    createBoard(slug, [{ id: 'x', title: 'xx' }]);
+    setAgentHostForTest('0.0.0.0');
+    const { res, calls } = await callHandle(`/api/agent/board/${slug}/cards/x/transcript`);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
+    expect(calls).toHaveLength(0); // gate short-circuits before the route
   });
 
   it('valid Bearer header succeeds and returns real endpoint data', async () => {

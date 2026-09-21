@@ -38,6 +38,8 @@ export interface RunRow {
   summary: string | null;
   worker_pid: number | null;
   worker_session_id: string | null;
+  /** Task `assignee` — the worker profile that owns the run (task_runs.profile). */
+  profile: string | null;
   started_at: number | null;
   ended_at: number | null;
   error: string | null;
@@ -136,6 +138,46 @@ export interface BoardSummary {
   stalledCount: number;
   maxInProgress: number | null; // from dispatcher config if present, else null
   lastSyncedAt: number; // unix ms of last successful poll
+}
+
+/** One item in a card's ordered worker transcript (transcript viewer). */
+export interface TranscriptEvent {
+  /** 1-based position in the emitted transcript (client render key). */
+  seq: number;
+  /** Unix seconds of the underlying message, or null when unset. */
+  at: number | null;
+  /**
+   * `user` / `assistant` → body text; `tool-call` → an assistant tool
+   * invocation (toolName + arguments); `tool-result` → a tool's output payload
+   * (bounded); `heartbeat` → a kanban heartbeat tool result.
+   */
+  kind: 'user' | 'assistant' | 'tool-call' | 'tool-result' | 'heartbeat';
+  /** Raw `messages.role` (user/assistant/tool), for styling/grouping. */
+  role: string;
+  /** Tool name for tool-call / tool-result / heartbeat events, else null. */
+  toolName: string | null;
+  /** Body text (user/assistant content, tool arguments, or bounded tool result). */
+  text: string;
+  /** True when this event's text was truncated to the bounded payload budget. */
+  truncated: boolean;
+}
+
+/**
+ * Result of reading a card's transcript (transcript viewer). `events` is
+ * ordered oldest→newest (by message id) and bounded: payloads are truncated to
+ * `MAX_PAYLOAD_CHARS` and the list to `MAX_EVENTS`, with `truncated` set when
+ * anything was cut.
+ */
+export interface TranscriptResult {
+  events: TranscriptEvent[];
+  /** True when any event body was truncated OR events were dropped past `MAX_EVENTS`. */
+  truncated: boolean;
+  /** The session id recorded on the card's own run (never user input). */
+  sessionId: string | null;
+  /** Owning worker profile (the profile whose `state.db` holds the session). */
+  profile: string | null;
+  /** False when the card has no session / session store missing -> "no transcript". */
+  hasTranscript: boolean;
 }
 
 /** Full snapshot (what /api/board/[slug] returns). */

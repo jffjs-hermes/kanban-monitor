@@ -20,6 +20,7 @@ import { hermesHome } from './board-discover';
 import { createPoller, type Poller, type PollerDelta } from './poller';
 import { resolveStaleMs } from './liveness';
 import { readCardDetail } from './card-detail';
+import { readCardTranscript } from './transcript';
 import { readSnapshot } from './snapshot';
 import { createSseHub, type BoardEvent, type SseHub } from './sse-hub';
 import type {
@@ -30,6 +31,7 @@ import type {
   DeltasSinceResult,
   RevisionedDelta,
   SseEvent,
+  TranscriptResult,
 } from '../types';
 
 /** Default poll interval (spec §5 `POLL_INTERVAL_MS`). */
@@ -120,6 +122,14 @@ export interface BoardRuntime {
   detailOf(slug: BoardSlug, taskId: string): CardDetail | null;
   /** Resolved staleness threshold (spec §5 `STALE_WORKER_MS`). */
   staleMs(): number;
+  /**
+   * Ordered transcript for one card on `slug` (transcript viewer), or null
+   * when the board is missing/unreadable or the task id does not exist. Reads
+   * the owning profile's session store, keyed only by the card's own run
+   * session id. Uses a short-lived read-only handle; safe to call from the
+   * transcript endpoint on every open/refresh.
+   */
+  transcriptOf(slug: BoardSlug, taskId: string): TranscriptResult | null;
   /** Subscribe to `slug`'s deltas (delegates to the owned hub). */
   subscribe(slug: BoardSlug, send: (evt: SseEvent) => void): () => void;
   /** Subscribe to the cross-board channel (delegates to the owned hub). */
@@ -310,6 +320,21 @@ export function createBoardRuntime(opts?: BoardRuntimeOptions): BoardRuntime {
       }
     },
     staleMs: () => staleMs,
+    transcriptOf(slug, taskId) {
+      const db = tryOpen(slug);
+      if (!db) return null;
+      try {
+        return readCardTranscript(db, taskId);
+      } catch {
+        return null; // board swapped/unreadable mid-read
+      } finally {
+        try {
+          db.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
     subscribe: (slug, send) => hub.subscribe(slug, send),
     subscribeAll: (send) => hub.subscribeAll(send),
     hub,

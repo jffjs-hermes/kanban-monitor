@@ -12,8 +12,87 @@
   // the × button all close it.
   import { drawer, closeDrawer, openDrawer } from '$lib/card-drawer';
   import { renderMarkdown } from '$lib/markdown';
-  import type { CardDetail, RunRow, TaskStatus } from '$lib/types';
+  import type { CardDetail, RunRow, TaskStatus, TranscriptEvent } from '$lib/types';
   import { findPrUrl } from '$lib/pr-link';
+
+  // --- Transcript tab (transcript viewer) ------------------------------------
+  // The transcript endpoint lives under /api/agent/* so it is AGENT_TOKEN-gated
+  // even for the UI (locked decision §2). The operator supplies the token once,
+  // stored in localStorage, and every transcript fetch sends it as a Bearer
+  // header. On a non-loopback deploy a missing/wrong token yields 401, which we
+  // surface with the token input instead of an opaque error.
+  const TOKEN_KEY = 'kanban-monitor-agent-token';
+  let token = $state<string>(localStorage.getItem(TOKEN_KEY) ?? '');
+  let transcript = $state<TranscriptEvent[] | null>(null);
+  let transcriptTruncated = $state(false);
+  let transcriptHas = $state(false);
+  let transcriptAuth = $state(false); // true when the last fetch 401'd
+  let expanded = $state<Set<number>>(new Set());
+
+  function persistToken() {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+    void loadTranscript();
+  }
+
+  function toggleExpand(seq: number) {
+    const s = new Set(expanded);
+    if (s.has(seq)) s.delete(seq);
+    else s.add(seq);
+    expanded = s;
+  }
+
+  async function loadTranscript() {
+    if (!st.open || st.taskId === null) return;
+    const slug = st.slug;
+    const taskId = st.taskId;
+    const headers: Record<string, string> = {};
+    if (token) headers['authorization'] = `Bearer ${token}`;
+    try {
+      const res = await fetch(
+        `/api/agent/board/${encodeURIComponent(slug)}/cards/${encodeURIComponent(taskId)}/transcript`,
+        { headers },
+      );
+      if (res.status === 401) {
+        transcriptAuth = true;
+        return;
+      }
+      transcriptAuth = false;
+      if (!res.ok) {
+        transcript = [];
+        transcriptHas = false;
+        transcriptTruncated = false;
+        return;
+      }
+      const d = (await res.json()) as {
+        events: TranscriptEvent[];
+        truncated: boolean;
+        hasTranscript: boolean;
+      };
+      transcript = d.events;
+      transcriptTruncated = d.truncated;
+      transcriptHas = d.hasTranscript;
+    } catch {
+      transcript = [];
+      transcriptHas = false;
+      transcriptTruncated = false;
+    }
+  }
+
+  function eventLabel(e: TranscriptEvent): string {
+    if (e.kind === 'tool-call') return e.toolName ? `→ ${e.toolName}` : '→ tool';
+    if (e.kind === 'tool-result') return `⇐ ${e.toolName ?? 'result'}`;
+    if (e.kind === 'heartbeat') return '♥ heartbeat';
+    if (e.kind === 'user') return 'you';
+    return 'agent';
+  }
+
+  function eventClass(e: TranscriptEvent): string {
+    if (e.kind === 'tool-call') return 'text-link';
+    if (e.kind === 'tool-result') return 'text-success';
+    if (e.kind === 'heartbeat') return 'text-faint';
+    return 'text-foreground';
+  }
 
   let detail = $state<CardDetail | null>(null);
   let loading = $state(false);
@@ -47,6 +126,10 @@
       detail = null;
       loading = false;
       error = null;
+      transcript = null;
+      transcriptTruncated = false;
+      transcriptHas = false;
+      transcriptAuth = false;
       return;
     }
     const slug = st.slug;
@@ -68,6 +151,10 @@
       .finally(() => {
         if (!cancelled) loading = false;
       });
+    // Live tail: refetch the transcript on every open/refresh tick so a running
+    // card's history advances with the same SSE `card` scope / rev flow that
+    // drives the detail refetch above.
+    void loadTranscript();
     return () => {
       cancelled = true;
     };
@@ -157,6 +244,62 @@
             <div class="markdown-body">{@html renderMarkdown(detail.body)}</div>
           {:else}
             <p class="text-[13px] text-faint">No body.</p>
+          {/if}
+        </section>
+
+        <section class="border-b border-surface-2 py-4">
+          <h3 class="m-0 mb-2.5 text-[12px] tracking-[.06em] uppercase text-muted">
+            Transcript
+            {#if transcript && transcript.length > 0}<span class="text-faint">{transcript.length}</span>{/if}
+            {#if transcriptTruncated}<span class="ml-1 rounded bg-warning-tint px-1.5 py-0.5 text-[11px] text-warning">truncated</span>{/if}
+          </h3>
+
+          {#if transcriptAuth}
+            <p class="mb-2 text-[13px] text-warning">This transcript requires the agent token (AGENT_TOKEN).</p>
+            <div class="mb-1 flex items-center gap-2">
+              <input
+                type="password"
+                class="min-w-0 flex-1 rounded-md border border-default bg-background px-2 py-1 text-[13px] text-foreground outline-none placeholder:text-faint focus:border-accent-strong"
+                placeholder="AGENT_TOKEN"
+                autocomplete="off"
+                spellcheck="false"
+                bind:value={token}
+                oninput={persistToken}
+                data-test="transcript-token"
+              />
+            </div>
+            <p class="text-[12px] text-faint">Stored locally in your browser; sent only to /api/agent/*.</p>
+          {:else if transcript === null}
+            <p class="text-[13px] text-faint">Loading transcript…</p>
+          {:else if !transcriptHas || transcript.length === 0}
+            <p class="text-[13px] text-faint">No transcript for this card’s latest run.</p>
+          {:else}
+            {#if token}
+              <div class="mb-2 flex items-center justify-end gap-2">
+                <button class="cursor-pointer rounded-md border border-default bg-transparent px-2 py-0.5 text-[12px] text-muted hover:border-border-strong hover:text-foreground" onclick={() => { token = ''; persistToken(); }} type="button">clear token</button>
+              </div>
+            {/if}
+            <ol class="m-0 flex list-none flex-col gap-1 p-0">
+              {#each transcript ?? [] as e (e.seq)}
+                <li class="rounded-md border border-surface-2 bg-background p-[8px_10px]">
+                  <div class="flex items-baseline gap-2 text-[12px]">
+                    <span class="font-mono shrink-0 tabular-nums text-faint">{fmtTime(e.at)}</span>
+                    <span class={`shrink-0 font-semibold ${eventClass(e)}`}>{eventLabel(e)}</span>
+                  </div>
+                  {#if e.text}
+                    {#if e.truncated && !expanded.has(e.seq)}
+                      <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{e.text}</pre>
+                      <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">show more…</button>
+                    {:else}
+                      <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground" data-expanded={e.truncated && expanded.has(e.seq)}>{e.text}{#if e.truncated}<span class="text-faint"> …</span>{/if}</pre>
+                      {#if e.truncated && expanded.has(e.seq)}
+                        <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">hide</button>
+                      {/if}
+                    {/if}
+                  {/if}
+                </li>
+              {/each}
+            </ol>
           {/if}
         </section>
 
