@@ -58,6 +58,8 @@ Then open http://localhost:8787.
 | `STALE_WORKER_MS`  | `90000`       | running-worker heartbeat staleness threshold       |
 | `POLL_INTERVAL_MS` | `1000`        | sqlite poll tick                                   |
 | `BOARD`            | `default`     | initial board on first load                        |
+| `AGENT_TOKEN`      | *(unset)*     | optional bearer token gating the agent surfaces   |
+|                    |               | (`/api/agent/*` + `/mcp`); see "Agent auth" below  |
 
 ## systemd deploy (auto-start on the Pi)
 
@@ -131,8 +133,9 @@ delta ring — no separate process, no double DB read):
   `/api/agent/board/[slug]/cards?assignee=&stalled=` (filtered query) for
   scripts/curl.
 
-Both surfaces are read-only in this increment (observe, don't mutate) and bind
-as the REST surface does today (no auth yet — deferred).
+Both surfaces are read-only in this increment (observe, don't mutate). They bind
+as the REST surface does today; see **Agent auth** below for the optional
+`AGENT_TOKEN` gate.
 
 ### Agent watcher loop (spec §4.4)
 
@@ -159,3 +162,76 @@ while (true) {
 ```
 
 The equivalent REST poll is `curl -s 'http://localhost:8787/api/agent/board/kanban-monitor/changes?since=0'`.
+
+## Agent auth (`AGENT_TOKEN`) — spec §6.1–6.4
+
+The agent-facing surfaces (`/api/agent/*` and `/mcp` — all methods including the
+MCP GET stream) can be gated behind an optional bearer token. The browser UI,
+ordinary REST endpoints (`/api/boards.json`, `/api/board/*`), and the browser SSE
+stream (`/api/events/*`) are **never** gated — the UI keeps working without a
+token.
+
+### Generate a token
+
+```sh
+openssl rand -hex 32   # 64 hex chars; keep it secret
+```
+
+### Set it
+
+```sh
+AGENT_TOKEN=<secret> bun run dev                    # dev server
+AGENT_TOKEN=<secret> PORT=8787 bun run start        # built app
+```
+
+Under systemd, add `Environment=AGENT_TOKEN=<secret>` to the unit override
+(`systemctl --user edit kanban-monitor`). Never commit the token to the repo;
+prefer launching with the value in the user environment or a root-only
+EnvironmentFile.
+
+### Send it on every request
+
+The token is re-checked **on every request** — an MCP session does not remember
+that it was authorized at `initialize`. Send the header on all of them.
+
+REST (curl):
+
+```sh
+curl -s -H "Authorization: Bearer $AGENT_TOKEN" \
+  'http://localhost:8787/api/agent/board/kanban-monitor/changes?since=0'
+```
+
+MCP (clients must repeat the header on `initialize` *and* every follow-up
+POST/GET/DELETE — configure it in the MCP client's header settings):
+
+```sh
+curl -s -X POST http://localhost:8787/mcp \
+  -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+```
+
+**`?token=<secret>` is a debug-only fallback** (e.g. a quick `curl` test) and is
+discouraged for real use: a token in a URL leaks into access logs, browser
+history, and referrer headers. Prefer the `Authorization: Bearer` header.
+
+Missing and wrong credentials both return the same `401` with a
+`WWW-Authenticate: Bearer` header and `{"error":"unauthorized"}` — the server does
+not reveal which one failed.
+
+### Default-open when unset + boot warning
+
+When `AGENT_TOKEN` is unset the agent surfaces stay **open** (they are read-only
+and the deployment is LAN-only). To make that state visible rather than silent,
+the process logs a prominent warning at boot whenever auth is disabled **and** the
+bind is non-loopback (`HOST` defaults to `0.0.0.0`):
+
+```
+agent surfaces open (no AGENT_TOKEN) on non-loopback bind — set AGENT_TOKEN to restrict
+```
+
+A loopback-only bind (`HOST=127.0.0.1`/`localhost`) suppresses the warning. If a
+future **write** surface (claim/transition/comment) is ever added, it must
+**default-deny** when `AGENT_TOKEN` is unset — write access must never be
+unauthenticated. This read-only MVP keeps default-open.

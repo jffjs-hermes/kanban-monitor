@@ -317,8 +317,30 @@ Event names (the `event:` field):
 | `STALE_WORKER_MS`  | `90000`                        | heartbeat staleness threshold |
 | `POLL_INTERVAL_MS` | `1000`                         | sqlite poll tick |
 | `BOARD`            | `default`                      | initial board on first load |
+| `AGENT_TOKEN`      | *(unset)*                      | optional bearer token gating `/api/agent/*` + `/mcp` (all methods); see Agent auth |
 
-No auth in MVP (private/localhost). No secrets are read by the app.
+The server also honors `AGENT_HOST` (defaults to `HOST`) solely to decide the
+boot auth warning's loopback check. No other secrets are read by the app.
+
+### Agent auth (`AGENT_TOKEN`, spec §6)
+
+- **Default-open when unset**, including on non-loopback binds; at boot the
+  process logs a loud WARN when auth is disabled on a non-loopback bind
+  (`agent surfaces open (no AGENT_TOKEN) on non-loopback bind — set AGENT_TOKEN
+  to restrict`). A loopback-only bind (`HOST=127.0.0.1`/`localhost`) suppresses
+  it. A future **write** surface must default-deny when unset; this read-only
+  MVP stays open.
+- **When set**: every `/api/agent/*` request and every `/mcp` method (POST/GET
+  DELETE, incl. the MCP GET SSE stream) requires `Authorization: Bearer
+  <token>` (primary) or the debug-only `?token=` query param. UI, ordinary
+  REST, and browser SSE surfaces are never gated.
+- **Per-request check** — the token is re-verified on every MCP follow-up
+  POST/GET/DELETE; establishing a session at `initialize` does not remember
+  auth.
+- **Uniform 401** for missing or wrong credentials: `401` +
+  `WWW-Authenticate: Bearer` + `{"error":"unauthorized"}` — the server does not
+  reveal which failed.
+- **Constant-time compare** via SHA-256 digest + `crypto.timingSafeEqual`.
 
 ---
 
