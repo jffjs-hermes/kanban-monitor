@@ -6,8 +6,21 @@
   // `now` is a ticking client clock; elapsed for running cards is computed
   // client-side by adding the elapsed since `frameAt` (spec §2.1: the server
   // does not push per-second elapsed updates).
+  //
+  // Stalled / credit-burn alert (Impl task): a running card whose heartbeat is
+  // stale gets a persistent warning treatment — amber tint + warning accent,
+  // a `stalled {age}` badge whose age ticks up every poll, and an emphasized
+  // run count when a worker has tried multiple times (escalating burn). All
+  // derived from state (liveness + elapsed + runCount vs `now`), so it survives
+  // a reload and clears the moment the heartbeat resumes or the card leaves
+  // Running.
   import LivenessDot from './LivenessDot.svelte';
-  import { recentTransition } from '../board-view';
+  import {
+    formatDuration,
+    isStalled,
+    recentTransition,
+    stallAgeMs,
+  } from '../board-view';
   import type { CardView, TaskStatus } from '../types';
 
   let {
@@ -21,6 +34,9 @@
     frameAt: number;
     onSelect?: (id: string) => void;
   } = $props();
+
+  const stalled = $derived(isStalled(card));
+  const stallAge = $derived(stallAgeMs(card, now, frameAt));
 
   function handleClick() {
     onSelect?.(card.id);
@@ -72,8 +88,10 @@
 
 <article
   class="mb-2.5 rounded-md border border-default bg-surface-2 p-3 text-[14px]"
-  class:border-l-3={card.status === 'running'}
-  class:border-l-accent={card.status === 'running'}
+  class:border-l-3={card.status === 'running' || stalled}
+  class:border-l-accent={card.status === 'running' && !stalled}
+  class:border-l-warning={stalled}
+  class:bg-warning-tint={stalled}
   class:cursor-pointer={!!onSelect}
   class:hover:border-border-strong={!!onSelect}
   class:hover:bg-surface-3={!!onSelect}
@@ -101,12 +119,30 @@
       <span class="text-link">→ {STATUS_LABEL[ann.to]}</span>
     </div>
   {/if}
+  {#if stalled && stallAge !== null}
+    <div
+      class="mt-1.5 inline-flex items-center gap-1.5 rounded-[10px] border border-warning bg-warning-tint px-[8px] py-px text-[11px] font-semibold text-warning"
+      role="status"
+      title="Heartbeat overdue — this running card is stalled and continuing to burn credits"
+    >
+      <span class="size-1.5 rounded-full bg-warning animate-pulse" aria-hidden="true"></span>
+      <span>stalled {formatDuration(stallAge)}</span>
+    </div>
+  {/if}
   <div class="mt-2.5 flex flex-wrap gap-2.5 text-[12px] text-muted">
     {#if card.assignee}<span class="text-link-soft">{card.assignee}</span>{/if}
     <span class="rounded-[10px] border border-default bg-surface px-[7px]">p{card.priority}</span>
     {#if card.status === 'running' && card.elapsedMs !== null}
       <span class="tabular-nums text-foreground">{elapsedText(card.elapsedMs, startedMs())}</span>
     {/if}
-    {#if card.runCount > 1}<span class="text-faint">{card.runCount} tries</span>{/if}
+    {#if card.runCount > 1}
+      <span
+        class="tabular-nums"
+        class:font-semibold={stalled}
+        class:text-warning={stalled}
+        class:text-faint={!stalled}
+        title={stalled ? 'Multiple attempts while stalled — escalating credit burn' : `${card.runCount} attempts`}
+      >{card.runCount} tries</span>
+    {/if}
   </div>
 </article>

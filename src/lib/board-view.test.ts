@@ -6,13 +6,17 @@ import { describe, expect, it } from 'vitest';
 import {
   COLUMN_DEFS,
   DEFAULT_COLUMN_LIMIT,
+  formatDuration,
   groupByStatus,
   initialBoardState,
+  isStalled,
   PRIMARY_COLUMNS,
   recentTransition,
   reduceBoard,
   sortByNewestFirst,
   sortCards,
+  sortStalledToTop,
+  stallAgeMs,
   takeNewest,
   TRANSITION_WINDOW_MS,
 } from './board-view';
@@ -287,5 +291,68 @@ describe('Impl — recentTransition window derivation', () => {
     const c = card('a', { lastTransition: { to: 'done', at } });
     expect(recentTransition(c, at * 1000 + 3_000, 2_000)).toBeNull(); // outside custom window
     expect(recentTransition(c, at * 1000 + 1_500, 2_000)).toEqual({ to: 'done', at });
+  });
+});
+
+describe('Impl — stalled / credit-burn alerting', () => {
+  // Helper: a running card. The `frameAt` (snapshot lastSyncedAt) is the anchor
+  // stallAgeMs adds the client-clock delta onto.
+  const frameAt = 1_700_000_000 * 1000; // unix ms
+  const running = (over: Partial<CardView> = {}): CardView =>
+    card('r', { status: 'running', liveness: 'active', elapsedMs: 0, runCount: 1, ...over });
+
+  it('isStalled is exactly running + liveness=stalled (reuses server semantics)', () => {
+    expect(isStalled(running({ liveness: 'stalled' }))).toBe(true);
+    expect(isStalled(running({ liveness: null }))).toBe(false); // not running is not stalled
+    expect(isStalled(running({ liveness: 'active' }))).toBe(false);
+    expect(isStalled(card('x', { status: 'done', liveness: 'stalled' }))).toBe(false);
+  });
+
+  it('sorts stalled cards to the top of a column, preserving relative order', () => {
+    const active1 = running({ id: 'a1', liveness: 'active', createdAt: 400 });
+    const stalled1 = running({ id: 's1', liveness: 'stalled', createdAt: 200 });
+    const active2 = running({ id: 'a2', liveness: 'active', createdAt: 300 });
+    const stalled2 = running({ id: 's2', liveness: 'stalled', createdAt: 500 });
+    const sorted = sortStalledToTop([active1, stalled1, active2, stalled2]).map((c) => c.id);
+    expect(sorted.slice(0, 2).sort()).toEqual(['s1', 's2']); // stalled at the top
+    expect(sorted.slice(2).sort()).toEqual(['a1', 'a2']);
+  });
+
+  it('groupByStatus pins stalled Running cards above active ones', () => {
+    const activeNew = running({ id: 'aN', liveness: 'active', createdAt: 400 });
+    const stalledNew = running({ id: 'sN', liveness: 'stalled', createdAt: 500 });
+    const stalledOld = running({ id: 'sO', liveness: 'stalled', createdAt: 100 });
+    const o = groupByStatus([activeNew, stalledNew, stalledOld]).running.map((c) => c.id);
+    // Within running: stalled first (newest-first within stalled), then active newest-first.
+    expect(o).toEqual(['sN', 'sO', 'aN']);
+  });
+
+  it('stallAgeMs grows across consecutive polls (monotone burn), from frameAt + tick', () => {
+    const st = running({ liveness: 'stalled', elapsedMs: 3_000 }); // running 3s at frameAt
+    const t0 = frameAt; // the snapshot timestamp
+    // Immediately after the frame the age is elapsedMs + 0.
+    expect(stallAgeMs(st, t0, frameAt)).toBe(3_000);
+    // Two polls later the client clock advanced ~ the age keeps growing.
+    expect(stallAgeMs(st, t0 + 20_000, frameAt)).toBe(23_000);
+    // A fresh snapshot bumps the base elapsed; still monotone total.
+    const newerFrame = frameAt + 60_000;
+    const st2 = running({ liveness: 'stalled', elapsedMs: 63_000 });
+    expect(stallAgeMs(st2, newerFrame, newerFrame)).toBe(63_000);
+  });
+
+  it('stallAgeMs is null (badge clears) when the heartbeat resumes or the card leaves Running', () => {
+    // Resume: liveness flips to active → no stall badge, even though still running.
+    expect(stallAgeMs(running({ liveness: 'active', elapsedMs: 5_000 }), frameAt, frameAt)).toBeNull();
+    // Leaves Running: status changes → no stall badge.
+    expect(stallAgeMs(card('x', { status: 'review' }), frameAt, frameAt)).toBeNull();
+    // No elapsed available → nothing to badge.
+    expect(stallAgeMs(running({ liveness: 'stalled', elapsedMs: null }), frameAt, frameAt)).toBeNull();
+  });
+
+  it('formatDuration renders compact stall ages', () => {
+    expect(formatDuration(0)).toBe('0s');
+    expect(formatDuration(45_000)).toBe('45s');
+    expect(formatDuration(185_000)).toBe('3m 5s');
+    expect(formatDuration(3 * 3600_000 + 5 * 60_000)).toBe('3h 5m');
   });
 });
