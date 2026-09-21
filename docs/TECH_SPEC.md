@@ -317,23 +317,29 @@ Event names (the `event:` field):
 | `STALE_WORKER_MS`  | `90000`                        | heartbeat staleness threshold |
 | `POLL_INTERVAL_MS` | `1000`                         | sqlite poll tick |
 | `BOARD`            | `default`                      | initial board on first load |
-| `AGENT_TOKEN`      | *(unset)*                      | optional bearer token gating `/api/agent/*` + `/mcp` (all methods); see Agent auth |
+| `AGENT_TOKEN`      | *(unset)*                      | bearer token gating `/api/agent/*`, `/mcp` (all methods), and sensitive reads; non-loopback deploys MUST set it (default-DENY when unset); see Agent auth |
 
-The server also honors `AGENT_HOST` (defaults to `HOST`) solely to decide the
-boot auth warning's loopback check. No other secrets are read by the app.
+The server also honors `AGENT_HOST` (defaults to `HOST`) to decide the boot auth
+warning's loopback check and the non-loopback default-deny. No other secrets
+are read by the app.
 
 ### Agent auth (`AGENT_TOKEN`, spec §6)
 
-- **Default-open when unset**, including on non-loopback binds; at boot the
-  process logs a loud WARN when auth is disabled on a non-loopback bind
-  (`agent surfaces open (no AGENT_TOKEN) on non-loopback bind — set AGENT_TOKEN
-  to restrict`). A loopback-only bind (`HOST=127.0.0.1`/`localhost`) suppresses
-  it. A future **write** surface must default-deny when unset; this read-only
-  MVP stays open.
-- **When set**: every `/api/agent/*` request and every `/mcp` method (POST/GET
-  DELETE, incl. the MCP GET SSE stream) requires `Authorization: Bearer
-  <token>` (primary) or the debug-only `?token=` query param. UI, ordinary
-  REST, and browser SSE surfaces are never gated.
+- **Default-DENY on non-loopback when unset** (spec §6.4 forward rule): if
+  `AGENT_TOKEN` is unset **and** the bind is non-loopback (`HOST` defaults to
+  `0.0.0.0`), every protected surface — `/api/agent/*`, `/mcp`, and the reserved
+  sensitive-read namespace `/api/transcripts/*` — returns a uniform `401`. At
+  boot the process logs a loud WARN (`agent surfaces DENIED on non-loopback
+  bind (…AGENT_TOKEN is unset…)`) so the denial is never silent. This makes the
+  monitor safe to later expose raw worker transcripts: the future transcript
+  viewer inherits the gate via the reserved matcher with no further hook change.
+- **Loopback-only bind stays open** (developer default): with
+  `HOST=127.0.0.1`/`localhost`/`::1` and no token, protected surfaces are open
+  for local development. Production/LAN deployments must set `AGENT_TOKEN`.
+- **When set**: every `/api/agent/*` request, every `/mcp` method (POST/GET
+  DELETE, incl. the MCP GET SSE stream), and every `/api/transcripts/*` request
+  requires `Authorization: Bearer <token>` (primary) or the debug-only `?token=`
+  query param. UI, ordinary REST, and browser SSE surfaces are never gated.
 - **Per-request check** — the token is re-verified on every MCP follow-up
   POST/GET/DELETE; establishing a session at `initialize` does not remember
   auth.

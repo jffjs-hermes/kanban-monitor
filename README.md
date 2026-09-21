@@ -58,8 +58,8 @@ Then open http://localhost:8787.
 | `STALE_WORKER_MS`  | `90000`       | running-worker heartbeat staleness threshold       |
 | `POLL_INTERVAL_MS` | `1000`        | sqlite poll tick                                   |
 | `BOARD`            | `default`     | initial board on first load                        |
-| `AGENT_TOKEN`      | *(unset)*     | optional bearer token gating the agent surfaces   |
-|                    |               | (`/api/agent/*` + `/mcp`); see "Agent auth" below  |
+| `AGENT_TOKEN`      | *(unset)*     | bearer token gating the agent/sensitive surfaces   |
+|                    |               | (`/api/agent/*` + `/mcp` + `/api/transcripts/*`); see "Agent auth" below  |
 
 ## systemd deploy (auto-start on the Pi)
 
@@ -165,11 +165,16 @@ The equivalent REST poll is `curl -s 'http://localhost:8787/api/agent/board/kanb
 
 ## Agent auth (`AGENT_TOKEN`) — spec §6.1–6.4
 
-The agent-facing surfaces (`/api/agent/*` and `/mcp` — all methods including the
-MCP GET stream) can be gated behind an optional bearer token. The browser UI,
-ordinary REST endpoints (`/api/boards.json`, `/api/board/*`), and the browser SSE
-stream (`/api/events/*`) are **never** gated — the UI keeps working without a
-token.
+The agent-facing surfaces (`/api/agent/*`, `/mcp` — all methods including the
+MCP GET stream — and the reserved sensitive-read namespace `/api/transcripts/*`)
+can be gated behind a bearer token. The browser UI, ordinary REST endpoints
+(`/api/boards.json`, `/api/board/*`), and the browser SSE stream
+(`/api/events/*`) are **never** gated — the UI keeps working without a token.
+
+**Every agent/client call must send the token**: send `Authorization: Bearer
+<token>` on every request to `/api/agent/*`, `/mcp`, or `/api/transcripts/*`
+when a token is configured. On a non-loopback deploy the token is **required**
+— see [Default-deny on non-loopback](#default-deny-on-non-loopback) below.
 
 ### Generate a token
 
@@ -220,18 +225,21 @@ Missing and wrong credentials both return the same `401` with a
 `WWW-Authenticate: Bearer` header and `{"error":"unauthorized"}` — the server does
 not reveal which one failed.
 
-### Default-open when unset + boot warning
+### Default-deny on non-loopback
 
-When `AGENT_TOKEN` is unset the agent surfaces stay **open** (they are read-only
-and the deployment is LAN-only). To make that state visible rather than silent,
-the process logs a prominent warning at boot whenever auth is disabled **and** the
-bind is non-loopback (`HOST` defaults to `0.0.0.0`):
+When `AGENT_TOKEN` is unset **and** the bind is non-loopback (`HOST` defaults
+to `0.0.0.0`), the agent and sensitive surfaces are **denied** — every request
+to `/api/agent/*`, `/mcp`, and `/api/transcripts/*` returns a uniform `401`
+until a token is configured. To surface a missing token rather than let it stay
+silent, the process logs a prominent warning at boot:
 
 ```
-agent surfaces open (no AGENT_TOKEN) on non-loopback bind — set AGENT_TOKEN to restrict
+agent surfaces DENIED on non-loopback bind (0.0.0.0) — AGENT_TOKEN is unset; set AGENT_TOKEN to authorize /api/agent/*, /mcp, and sensitive reads
 ```
 
-A loopback-only bind (`HOST=127.0.0.1`/`localhost`) suppresses the warning. If a
-future **write** surface (claim/transition/comment) is ever added, it must
-**default-deny** when `AGENT_TOKEN` is unset — write access must never be
-unauthenticated. This read-only MVP keeps default-open.
+`HOST=127.0.0.1`/`localhost`/`::1` (a loopback-only bind) suppresses the denial
+and stays **open** without a token — the developer default for local work. Any
+LAN/container deployment must set `AGENT_TOKEN`; otherwise agent access is
+impossible-by-design (not silently open). This guards the future raw-transcript
+surface: `/api/transcripts/*` is reserved for the upcoming viewer and inherits
+the same enforcement with no further change.

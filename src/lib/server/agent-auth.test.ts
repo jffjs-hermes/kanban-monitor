@@ -1,7 +1,7 @@
-// Unit tests: shared AGENT_TOKEN auth helper (spec §6.2; M-1 #4).
+// Unit tests: shared AGENT_TOKEN auth helper (spec §6.2/§6.4; M-1 #4).
 // The helper reads env once at module load but exposes a test seam
-// (setAgentTokenForTest), so each scenario toggles the configured token
-// directly rather than re-importing.
+// (setAgentTokenForTest / setAgentHostForTest), so each scenario toggles the
+// configured token and bind host directly rather than re-importing.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -9,11 +9,16 @@ import {
   isAgentSurface,
   isAuthorized,
   isAuthEnabled,
+  isDefaultDenyOnNonLoopback,
   isLoopbackHost,
+  isProtectedSurface,
+  isSensitiveSurface,
   secureEqual,
+  setAgentHostForTest,
   setAgentTokenForTest,
+  shouldDenyProtectedSurface,
   unauthorizedResponse,
-  warnIfAgentOpenOnNonLoopback,
+  warnIfDenyingOnNonLoopback,
 } from './agent-auth';
 
 /** Build a Request with the given path + headers (used for extractToken/isAuthorized). */
@@ -23,6 +28,8 @@ function req(path: string, headers: Record<string, string> = {}) {
 
 afterEach(() => {
   setAgentTokenForTest(undefined);
+  // Reset bind to the production default so tests never leak host state.
+  setAgentHostForTest('0.0.0.0');
   vi.restoreAllMocks();
 });
 
@@ -82,6 +89,42 @@ describe('isAgentSurface', () => {
   });
 });
 
+describe('isSensitiveSurface (reserved card-transcript namespace, spec §6.4)', () => {
+  it('flags the reserved /api/transcripts/* namespace', () => {
+    expect(isSensitiveSurface('/api/transcripts/board/default')).toBe(true);
+    expect(isSensitiveSurface('/api/transcripts/board/default/run/42')).toBe(true);
+  });
+
+  it('flags the agent-API-adjacent transcript form', () => {
+    expect(isSensitiveSurface('/api/agent/board/default/transcripts')).toBe(true);
+    expect(isSensitiveSurface('/api/agent/board/default/transcripts/42')).toBe(true);
+  });
+
+  it('never flags agent summaries, ordinary REST, UI, or SSE', () => {
+    expect(isSensitiveSurface('/api/agent/board/default/changes')).toBe(false);
+    expect(isSensitiveSurface('/api/agent/board/default/cards')).toBe(false);
+    expect(isSensitiveSurface('/api/boards.json')).toBe(false);
+    expect(isSensitiveSurface('/')).toBe(false);
+    expect(isSensitiveSurface('/api/events/default')).toBe(false);
+  });
+});
+
+describe('isProtectedSurface', () => {
+  it('is the union of agent and sensitive surfaces', () => {
+    expect(isProtectedSurface('/mcp')).toBe(true);
+    expect(isProtectedSurface('/api/agent/board/b/changes')).toBe(true);
+    expect(isProtectedSurface('/api/transcripts/board/b/run/1')).toBe(true);
+    expect(isProtectedSurface('/api/agent/board/b/transcripts/1')).toBe(true);
+  });
+
+  it('never flags unprotected surfaces', () => {
+    expect(isProtectedSurface('/')).toBe(false);
+    expect(isProtectedSurface('/api/boards.json')).toBe(false);
+    expect(isProtectedSurface('/api/board/default.json')).toBe(false);
+    expect(isProtectedSurface('/api/events/default')).toBe(false);
+  });
+});
+
 describe('isLoopbackHost', () => {
   it('recognizes loopback binds', () => {
     expect(isLoopbackHost('127.0.0.1')).toBe(true);
@@ -97,6 +140,26 @@ describe('isLoopbackHost', () => {
   });
 });
 
+describe('isDefaultDenyOnNonLoopback', () => {
+  it('false when a token is set (auth enabled) even on non-loopback', () => {
+    setAgentTokenForTest('cfg');
+    setAgentHostForTest('0.0.0.0');
+    expect(isDefaultDenyOnNonLoopback()).toBe(false);
+  });
+
+  it('false when token unset on a loopback bind', () => {
+    setAgentTokenForTest(undefined);
+    setAgentHostForTest('127.0.0.1');
+    expect(isDefaultDenyOnNonLoopback()).toBe(false);
+  });
+
+  it('true when token unset on a non-loopback bind (default-deny)', () => {
+    setAgentTokenForTest(undefined);
+    setAgentHostForTest('0.0.0.0');
+    expect(isDefaultDenyOnNonLoopback()).toBe(true);
+  });
+});
+
 describe('unauthorizedResponse', () => {
   it('is a uniform 401 JSON with WWW-Authenticate: Bearer', async () => {
     const res = unauthorizedResponse();
@@ -107,12 +170,39 @@ describe('unauthorizedResponse', () => {
   });
 });
 
-describe('default-open when AGENT_TOKEN is unset', () => {
+describe('default-open when AGENT_TOKEN is unset on a LOOPBACK bind', () => {
   it('auth is disabled and authorizes agent surfaces without any credentials', () => {
     setAgentTokenForTest(undefined);
+    setAgentHostForTest('127.0.0.1');
     expect(isAuthEnabled()).toBe(false);
     expect(isAuthorized(req('/api/agent/board/b/changes'))).toBe(true);
     expect(isAuthorized(req('/mcp'))).toBe(true);
+    // The surface-level gate honours the loopback open default.
+    expect(shouldDenyProtectedSurface('/mcp', req('/mcp'))).toBe(false);
+  });
+});
+
+describe('default-DENY when AGENT_TOKEN is unset on a NON-loopback bind (spec §6.4)', () => {
+  it('denies agent, MCP, and sensitive surfaces without credentials', () => {
+    setAgentTokenForTest(undefined);
+    setAgentHostForTest('0.0.0.0');
+    for (const p of [
+      '/api/agent/board/b/changes',
+      '/api/agent/board/b/cards',
+      '/mcp',
+      '/api/transcripts/board/b/run/1',
+      '/api/agent/board/b/transcripts/1',
+    ]) {
+      expect(shouldDenyProtectedSurface(p, req(p))).toBe(true);
+    }
+  });
+
+  it('still allows UI / ordinary REST / SSE surfaces without credentials', () => {
+    setAgentTokenForTest(undefined);
+    setAgentHostForTest('0.0.0.0');
+    for (const p of ['/', '/api/boards.json', '/api/board/default.json', '/api/events/default']) {
+      expect(shouldDenyProtectedSurface(p, req(p))).toBe(false);
+    }
   });
 });
 
@@ -141,29 +231,48 @@ describe('enforcement when AGENT_TOKEN is set', () => {
     expect(isAuthorized(req('/mcp'))).toBe(false);
     expect(isAuthorized(req('/api/agent/board/b/cards'))).toBe(false);
   });
+
+  it('surface gate: valid token allows on non-loopback, invalid denies', () => {
+    setAgentTokenForTest('cfg');
+    setAgentHostForTest('0.0.0.0');
+    expect(shouldDenyProtectedSurface('/mcp', req('/mcp', { authorization: 'Bearer cfg' }))).toBe(false);
+    expect(shouldDenyProtectedSurface('/api/agent/board/b/changes', req('/api/agent/board/b/changes'))).toBe(true);
+    expect(shouldDenyProtectedSurface('/api/transcripts/board/b/run/1', req('/api/transcripts/board/b/run/1', { authorization: 'Bearer cfg' }))).toBe(false);
+  });
+
+  it('surface gate: UI is never denied on non-loopback even without a token header', () => {
+    setAgentTokenForTest('cfg');
+    setAgentHostForTest('0.0.0.0');
+    expect(shouldDenyProtectedSurface('/api/events/default', req('/api/events/default'))).toBe(false);
+    expect(shouldDenyProtectedSurface('/', req('/'))).toBe(false);
+  });
 });
 
-describe('warnIfAgentOpenOnNonLoopback (boot warning, spec §6.1)', () => {
-  it('warns when AGENT_TOKEN is unset on a non-loopback bind', () => {
+describe('warnIfDenyingOnNonLoopback (boot warning, spec §6.1/§6.4)', () => {
+  it('warns when AGENT_TOKEN is unset on a non-loopback bind (denial is active)', () => {
     setAgentTokenForTest(undefined);
+    setAgentHostForTest('0.0.0.0');
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(warnIfAgentOpenOnNonLoopback('0.0.0.0')).toBe(true);
+    expect(warnIfDenyingOnNonLoopback()).toBe(true);
     expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('agent surfaces open (no AGENT_TOKEN) on non-loopback bind'),
+      expect.stringContaining('agent surfaces DENIED on non-loopback bind'),
     );
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('set AGENT_TOKEN'));
   });
 
   it('does not warn on a loopback bind', () => {
     setAgentTokenForTest(undefined);
+    setAgentHostForTest('127.0.0.1');
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(warnIfAgentOpenOnNonLoopback('127.0.0.1')).toBe(false);
+    expect(warnIfDenyingOnNonLoopback()).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });
 
   it('does not warn when AGENT_TOKEN is set (even on non-loopback)', () => {
     setAgentTokenForTest('cfg');
+    setAgentHostForTest('0.0.0.0');
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(warnIfAgentOpenOnNonLoopback('0.0.0.0')).toBe(false);
+    expect(warnIfDenyingOnNonLoopback()).toBe(false);
     expect(spy).not.toHaveBeenCalled();
   });
 });

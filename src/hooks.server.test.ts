@@ -1,12 +1,14 @@
-// Unit tests: SvelteKit auth hook (spec §6.3; M-1 #4).
+// Unit tests: SvelteKit auth hook (spec §6.3-§6.4; M-1 #4).
 // Exercises the real handle() gate against fake RequestEvent-like objects,
-// verifying the agent paths and every /mcp method are gated when AGENT_TOKEN is
-// set, and that UI / ordinary REST / SSE surfaces are never gated. Also covers
-// the boot-warning surface (spec §6.1) via the shared helper.
+// verifying the agent paths, every /mcp method, and the reserved sensitive
+// namespace are gated when AGENT_TOKEN is set OR when it is unset on a
+// non-loopback bind (default-deny), and that UI / ordinary REST / SSE surfaces
+// are never gated. Also covers the boot-warning surface (spec §6.1) via the
+// shared helper.
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { handle } from './hooks.server';
-import { setAgentTokenForTest } from '$lib/server/agent-auth';
+import { setAgentHostForTest, setAgentTokenForTest } from '$lib/server/agent-auth';
 
 /** Build a fake { event, resolve } pair for the gate. */
 function makeEvent(pathname: string, method = 'GET', headers: Record<string, string> = {}) {
@@ -21,17 +23,20 @@ function makeEvent(pathname: string, method = 'GET', headers: Record<string, str
 
 beforeEach(() => {
   setAgentTokenForTest(undefined);
+  // Developer default: bind is loopback, so the unset-token state stays open.
+  // Tests that need non-loopback deny override this per-case.
+  setAgentHostForTest('127.0.0.1');
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
   setAgentTokenForTest(undefined);
+  setAgentHostForTest('0.0.0.0');
   vi.restoreAllMocks();
 });
 
-describe('hook: default-open when AGENT_TOKEN is unset', () => {
+describe('hook: default-open when AGENT_TOKEN is unset on a LOOPBACK bind', () => {
   it('lets agent paths and /mcp through without credentials', async () => {
-    setAgentTokenForTest(undefined);
     const t1 = makeEvent('/api/agent/board/b/changes');
     const r1 = await handle(t1 as never);
     expect(r1.status).toBe(200);
@@ -41,6 +46,38 @@ describe('hook: default-open when AGENT_TOKEN is unset', () => {
     const r2 = await handle(t2 as never);
     expect(r2.status).toBe(200);
     expect(t2.resolve).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('hook: default-DENY when AGENT_TOKEN is unset on a NON-loopback bind (spec §6.4)', () => {
+  it('returns 401 for agent, MCP, and sensitive surfaces without credentials', async () => {
+    setAgentHostForTest('0.0.0.0');
+    for (const p of [
+      '/api/agent/board/b/changes',
+      '/api/agent/board/b/cards',
+      '/mcp',
+      '/api/transcripts/board/b/run/1',
+      '/api/agent/board/b/transcripts/1',
+    ]) {
+      const t = makeEvent(p);
+      t.resolve.mockClear();
+      const r = await handle(t as never);
+      expect(r.status).toBe(401);
+      expect(r.headers.get('www-authenticate')).toBe('Bearer');
+      expect(await r.json()).toEqual({ error: 'unauthorized' });
+      expect(t.resolve).not.toHaveBeenCalled();
+    }
+  });
+
+  it('still lets UI / ordinary REST / SSE through without credentials', async () => {
+    setAgentHostForTest('0.0.0.0');
+    const paths = ['/', '/api/boards.json', '/api/board/default.json', '/api/events/default'];
+    for (const p of paths) {
+      const t = makeEvent(p);
+      const r = await handle(t as never);
+      expect(r.status).toBe(200);
+      expect(t.resolve).toHaveBeenCalledTimes(1);
+    }
   });
 });
 
@@ -79,6 +116,27 @@ describe('hook: enforcement on agent surfaces when AGENT_TOKEN is set', () => {
     const t = makeEvent('/api/agent/board/b/cards?token=cfg');
     const r = await handle(t as never);
     expect(r.status).toBe(200);
+  });
+});
+
+describe('hook: enforcement on the reserved sensitive namespace when AGENT_TOKEN is set', () => {
+  it('rejects the transcript path with no token even inside the agent namespace', async () => {
+    setAgentTokenForTest('cfg');
+    for (const p of ['/api/transcripts/board/b/run/1', '/api/agent/board/b/transcripts/1']) {
+      const t = makeEvent(p);
+      t.resolve.mockClear();
+      const r = await handle(t as never);
+      expect(r.status).toBe(401);
+      expect(t.resolve).not.toHaveBeenCalled();
+    }
+  });
+
+  it('accepts the transcript path with a valid Bearer token', async () => {
+    setAgentTokenForTest('cfg');
+    const t = makeEvent('/api/transcripts/board/b/run/1', 'GET', { authorization: 'Bearer cfg' });
+    const r = await handle(t as never);
+    expect(r.status).toBe(200);
+    expect(t.resolve).toHaveBeenCalledTimes(1);
   });
 });
 
