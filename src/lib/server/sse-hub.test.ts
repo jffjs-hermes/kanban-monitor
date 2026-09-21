@@ -103,7 +103,7 @@ describe('wire framing (§4)', () => {
     },
     runningCount: 0, stalledCount: 0, maxInProgress: null, lastSyncedAt: 1,
   };
-  const fakeSnapshot = { slug: 'default', summary: fakeSummary, cards: [fakeCardView], revision: 0 };
+  const fakeSnapshot = { slug: 'default', summary: fakeSummary, cards: [fakeCardView], health: [], revision: 0 };
 
   it('sseWireEvent maps scopes to spec-§4 wire names + payload shapes', () => {
     expect(sseWireEvent({ seq: 1, at: 1, scope: { kind: 'reset' } }, fakeSnapshot))

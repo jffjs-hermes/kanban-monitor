@@ -100,6 +100,35 @@ export interface CardDetail {
   comments: CommentRow[];
 }
 
+/**
+ * Live health of one worker profile (agent health panel, spec §1.2). Read-only
+ * derivation over `task_runs` + `tasks` — the monitor never touches the board's
+ * state machine. A profile appears only while it has a currently-running task.
+ */
+export interface AgentHealth {
+  /** Task `assignee` — the worker profile this entry describes. */
+  profile: string;
+  /** Number of that profile's cards currently `status='running'`. */
+  runningCardCount: number;
+  /** `worker_pid` of the profile's latest run (task_runs). Null if none. */
+  workerPid: number | null;
+  /** `worker_session_id` of the latest run (metadata JSON). Cross-reference
+   * against active runs; null if the latest run recorded none. */
+  workerSessionId: string | null;
+  /** `started_at` (unix s) of the profile's latest run. */
+  runStartedAt: number | null;
+  /**
+   * Age (seconds) of the freshest heartbeat among the profile's running cards
+   * (now − last_heartbeat_at). Null when none of them has recorded a heartbeat
+   * while running. Mirrors the card liveness boundary: age ≥ STALE_WORKER_MS
+   * is stale, exactly like `classify`.
+   */
+  heartbeatAgeSec: number | null;
+  /** True when no running card of this profile has a fresh heartbeat (reuses
+   * `liveness` semantics: heartbeat missing or ≥ STALE_WORKER_MS old). */
+  stale: boolean;
+}
+
 /** Top strip. */
 export interface BoardSummary {
   countsByStatus: Record<TaskStatus, number>;
@@ -114,6 +143,8 @@ export interface BoardSnapshot {
   slug: BoardSlug;
   summary: BoardSummary;
   cards: CardView[]; // non-archived, sorted status → priority → age
+  /** Per-profile worker health; empty when no profile has a running card. */
+  health: AgentHealth[];
   /**
    * Per-board monotonic revision (spec §3.1). Owned by the runtime; bumped by
    * exactly +1 per non-trivial delta the poller publishes (trivial/no-change
