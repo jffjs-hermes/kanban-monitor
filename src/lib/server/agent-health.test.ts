@@ -34,6 +34,7 @@ function run(over: Partial<RunRow>): RunRow {
     summary: null,
     worker_pid: over.worker_pid ?? null,
     worker_session_id: over.worker_session_id ?? null,
+    profile: over.profile ?? null,
     started_at: over.started_at ?? null,
     ended_at: null,
     error: null,

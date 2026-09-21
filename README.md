@@ -132,6 +132,12 @@ delta ring — no separate process, no double DB read):
 - **REST** at `/api/agent/board/[slug]/changes?since=` (resumable cursor) and
   `/api/agent/board/[slug]/cards?assignee=&stalled=` (filtered query) for
   scripts/curl.
+- **Card transcript** at `/api/agent/board/[slug]/cards/[id]/transcript` —
+  the ordered worker session transcript for one card's latest run (roles,
+  tool calls, tool results, heartbeats) with bounded/truncated payloads,
+  keyed strictly by the card's own run session id (no arbitrary session
+  reads). The drawer's **Transcript** section renders it, live-refreshing for
+  a running card.
 
 Both surfaces are read-only in this increment (observe, don't mutate). They bind
 as the REST surface does today; see **Agent auth** below for the optional
