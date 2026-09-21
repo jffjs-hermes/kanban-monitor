@@ -16,6 +16,11 @@
 #
 # Jump to a specific board by default with:  systemctl --user edit kanban-monitor
 # and add `Environment=BOARD=kanban-monitor` under [Service].
+#
+# Agent auth (spec §6): set `Environment=AGENT_TOKEN=<secret>` under [Service]
+# (generate with `openssl rand -hex 32`) to gate the agent surfaces
+# (/api/agent/* and /mcp). When unset, agents stay default-open on non-loopback
+# binds with a loud boot warning. The browser UI/SSE are never gated.
 
 [Unit]
 Description=Kanban Board Monitor (SvelteKit adapter-node + SSE)
