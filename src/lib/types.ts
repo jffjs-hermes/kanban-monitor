@@ -158,6 +158,7 @@ export interface BoardSnapshot {
 
 export type DeltaScope =
   | { kind: 'summary' } // BoardSummary changed
+  | { kind: 'health'; health: AgentHealth[] } // per-profile worker health changed
   | { kind: 'cards'; upserts: CardView[]; removedIds: string[] }
   | { kind: 'card'; taskId: string } // detail data for one card changed
   | { kind: 'reset' }; // too big / DB swapped — resend full

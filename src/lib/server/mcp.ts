@@ -51,6 +51,11 @@ function toAgentChanges(deltas: DeltaScope[], resetCards: CardView[]): AgentChan
       changes.push({ kind: 'summary' });
     } else if (d.kind === 'card') {
       changes.push({ kind: 'card', taskId: d.taskId });
+    } else if (d.kind === 'health') {
+      // Agent API surface (spec §6) has no health scope — the UI gets per-
+      // worker health via the SSE `health` event. Skip it so the agent delta
+      // shape stays unchanged.
+      continue;
     } else {
       changes.push({ kind: 'cards', upserts: d.upserts, removedIds: d.removedIds });
     }

@@ -27,6 +27,7 @@ const EVENT_NAMES: BoardEventName[] = [
   'hello',
   'reset',
   'summary',
+  'health',
   'cards',
   'card',
   'ping',

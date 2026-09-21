@@ -4,7 +4,7 @@
 // produces the scoped deltas a client needs. Only `differ.ts` decides "what
 // changed" (spec §1.2 boundary rule). No SQL, no timers, no I/O.
 
-import type { BoardSnapshot, CardView, DeltaScope } from '../types';
+import type { AgentHealth, BoardSnapshot, CardView, DeltaScope } from '../types';
 
 /** Fraction of cards that may change before we fall back to a reset (spec §2.1). */
 const RESET_CHANGED_RATIO = 0.3;
@@ -70,13 +70,45 @@ function sameSummary(a: BoardSnapshot, b: BoardSnapshot): boolean {
 }
 
 /**
+ * Whether the per-profile worker health changed (spec §1.2 agent health).
+ *
+ * `heartbeatAgeSec` is intentionally NOT compared: it re-derives from `now`
+ * every poll, so a healthy worker's age simply ticks up and would false-positive
+ * on every tick. The `stale` boolean IS the heartbeat-age bucket (age below /
+ * at-or-above STALE_WORKER_MS), matching the card liveness boundary — so a
+ * heartbeat-age change is a health-content change only when it crosses into or
+ * out of the stale bucket. Compare the stable identity + derived fields instead.
+ * Array equality by profile (arrays are deterministically sorted in
+ * `deriveAgentHealth`).
+ */
+function sameHealth(a: readonly AgentHealth[], b: readonly AgentHealth[]): boolean {
+  if (a.length !== b.length) return false;
+  const byProfile = new Map(b.map((h) => [h.profile, h]));
+  for (const ha of a) {
+    const hb = byProfile.get(ha.profile);
+    if (!hb) return false;
+    if (
+      ha.runningCardCount !== hb.runningCardCount ||
+      ha.workerPid !== hb.workerPid ||
+      ha.workerSessionId !== hb.workerSessionId ||
+      ha.runStartedAt !== hb.runStartedAt ||
+      ha.stale !== hb.stale
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Diff `prev` against `next`, returning the scopes to push (spec §3).
  *
  * - `prev === null` (first tick) → `reset` (client needs the full state).
  * - board slug changed → `reset`.
  * - >~30% of cards changed → `reset` (full resend beats a large delta).
- * - otherwise → 'summary' if the strip changed, 'cards' if the card set/fields
- *   changed, plus a 'card' scope per changed task id (open drawers refresh).
+ * - otherwise → 'summary' if the strip changed, 'health' if worker health
+ *   changed, 'cards' if the card set/fields changed, plus a 'card' scope per
+ *   changed task id (open drawers refresh).
  */
 export function diffSnapshot(prev: BoardSnapshot | null, next: BoardSnapshot): DeltaScope[] {
   if (prev === null) return [{ kind: 'reset' }];
@@ -111,6 +143,7 @@ export function diffSnapshot(prev: BoardSnapshot | null, next: BoardSnapshot): D
 
   const scopes: DeltaScope[] = [];
   if (!sameSummary(prev, next)) scopes.push({ kind: 'summary' });
+  if (!sameHealth(prev.health, next.health)) scopes.push({ kind: 'health', health: next.health });
   if (upserts.length > 0 || removedIds.length > 0) {
     scopes.push({ kind: 'cards', upserts, removedIds });
   }

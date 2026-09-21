@@ -21,12 +21,26 @@ import {
   TRANSITION_WINDOW_MS,
 } from './board-view';
 import type {
+  AgentHealth,
   BoardSnapshot,
   BoardSummary,
   CardView,
 } from './types';
 
 const T = (n: number): number => 1_700_000_000_000 + n;
+
+function healthEntry(over: Partial<AgentHealth> = {}): AgentHealth {
+  return {
+    profile: 'builder',
+    runningCardCount: 1,
+    workerPid: 1234,
+    workerSessionId: 'sess-1',
+    runStartedAt: 1_700_000_000,
+    heartbeatAgeSec: 5,
+    stale: false,
+    ...over,
+  };
+}
 
 function card(id: string, over: Partial<CardView> = {}): CardView {
   return {
@@ -88,6 +102,28 @@ describe('reduceBoard — realtime sequence', () => {
     expect(s.snapshot!.summary.runningCount).toBe(2);
     expect(s.snapshot!.summary.stalledCount).toBe(1);
     expect(s.seq).toBe(2);
+  });
+
+  it('merges a health delta into the existing snapshot, preserving other fields', () => {
+    let s = initialBoardState('default');
+    const base = snapshot('default', [card('a')]);
+    s = reduceBoard(s, 'reset', base, 1, T(1));
+    // A worker starts: health arrives as a delta, no full reset.
+    s = reduceBoard(s, 'health', [healthEntry()], 2, T(6));
+    expect(s.snapshot!.health).toEqual([healthEntry()]);
+    expect(s.snapshot!.cards).toHaveLength(1); // cards untouched
+    expect(s.snapshot!.cards[0].id).toBe('a');
+    expect(s.snapshot!.summary).toBe(base.summary); // summary untouched
+    expect(s.seq).toBe(2);
+    expect(s.lastEventAt).toBe(T(6));
+  });
+
+  it('merges a health delta to empty when a worker stops (panel disappears)', () => {
+    let s = initialBoardState('default');
+    s = reduceBoard(s, 'reset', snapshot('default', [card('a')], { health: [healthEntry()] }), 1, T(1));
+    s = reduceBoard(s, 'health', [], 2, T(7));
+    expect(s.snapshot!.health).toEqual([]);
+    expect(s.snapshot!.cards).toHaveLength(1); // no reset
   });
 
   it('upserts and removes cards in place on cards delta', () => {
