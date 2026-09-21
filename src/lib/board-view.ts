@@ -111,6 +111,55 @@ export function takeNewest(cards: CardView[], limit: number = DEFAULT_COLUMN_LIM
   return cards.slice(0, Math.max(0, limit));
 }
 
+// --- Stalled / credit-burn alerting (Impl task) ------------------------------
+//
+// A running card with a stale (or missing) heartbeat is "stalled". We surface
+// it loudly and blame it for the credit burn: pull it to the top of Running,
+// badge its stall age, and emphasize the run count when a worker has tried
+// multiple times (each retry burns credits while it stays stuck). Everything
+// is derived from the current snapshot (liveness + elapsed + runCount) vs the
+// ticking client clock — no new server fields, no per-event flash, survives a
+// reload.
+
+/** True when the card is running and its heartbeat is stale/missing — exactly
+ * the server's `liveness === 'stalled'` (`status='running'` + heartbeat age ≥
+ * STALE_WORKER_MS, or no heartbeat). Not a second definition. */
+export function isStalled(card: CardView): boolean {
+  return card.status === 'running' && card.liveness === 'stalled';
+}
+
+/** Reorder a column list so stalled cards move ahead of every non-stalled card,
+ * preserving the input (newest-first) relative order within each group. Used on
+ * the Running column so stuck cards needing eyes land at the top. */
+export function sortStalledToTop(cards: CardView[]): CardView[] {
+  return [...cards].sort((a, b) => Number(isStalled(b)) - Number(isStalled(a)));
+}
+
+/**
+ * Live stall duration (ms) for a stalled running card. `elapsedMs` is how long
+ * the card has been running at `frameAt` (the snapshot's lastSyncedAt); we add
+ * the client-clock elapsed since the frame so the age ticks up every poll and
+ * reads as "this has been burning" across consecutive polls. State-derived:
+ * returns `null` (and the badge disappears) the moment the card is no longer
+ * classified stalled or leaves Running.
+ */
+export function stallAgeMs(card: CardView, now: number, frameAt: number): number | null {
+  if (!isStalled(card) || card.elapsedMs === null) return null;
+  const startedMs = frameAt - card.elapsedMs;
+  return Math.max(0, now - startedMs);
+}
+
+/** Compact duration string for a stall badge, e.g. "45s", "3m 5s", "2h 5m". */
+export function formatDuration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
 function reconcile(
   snapshot: BoardSnapshot,
   upserts: CardView[],
@@ -253,5 +302,7 @@ export function groupByStatus(cards: CardView[]): Record<TaskStatus, CardView[]>
   const groups = {} as Record<TaskStatus, CardView[]>;
   for (const st of Object.keys(STATUS_ORDER) as TaskStatus[]) groups[st] = [];
   for (const c of sortByNewestFirst(cards)) groups[c.status]!.push(c);
+  // Stalled cards land at the top of the Running column (credit-burn alert).
+  groups.running = sortStalledToTop(groups.running);
   return groups;
 }
