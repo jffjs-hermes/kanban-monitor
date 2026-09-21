@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { diffSnapshot } from './differ';
-import type { BoardSnapshot, BoardSummary, CardView } from '../types';
+import type { AgentHealth, BoardSnapshot, BoardSummary, CardView } from '../types';
 
 function card(id: string, over: Partial<CardView> = {}): CardView {
   return {
@@ -44,8 +44,26 @@ function summary(over: Partial<BoardSummary> = {}): BoardSummary {
   };
 }
 
-function snap(slug: string, cards: CardView[], over: Partial<BoardSummary> = {}): BoardSnapshot {
-  return { slug, summary: summary(over), cards, health: [], revision: 0 };
+function snap(
+  slug: string,
+  cards: CardView[],
+  over: Partial<BoardSummary> = {},
+  health: AgentHealth[] = [],
+): BoardSnapshot {
+  return { slug, summary: summary(over), cards, health, revision: 0 };
+}
+
+function healthEntry(over: Partial<AgentHealth> = {}): AgentHealth {
+  return {
+    profile: 'builder',
+    runningCardCount: 1,
+    workerPid: 1234,
+    workerSessionId: 'sess-1',
+    runStartedAt: 1_700_000_000,
+    heartbeatAgeSec: 5,
+    stale: false,
+    ...over,
+  };
 }
 
 function cardsScope(scopes: any[]) {
@@ -144,5 +162,76 @@ describe('diffSnapshot', () => {
     // Change 4 of 10 (40%) → exceeds 30% → reset.
     const changed = ten.map((c, i) => (i < 4 ? { ...c, title: 'Changed ' + c.id } : c));
     expect(diffSnapshot(snap('default', ten), snap('default', changed))).toEqual([{ kind: 'reset' }]);
+  });
+});
+
+// Agent health live-refresh (§1.2): the differ must emit a `health` scope when
+// the derived per-profile health actually changes, and stay silent on the
+// now-derived heartbeat-age ticking that is the steady-state of every poll.
+describe('diffSnapshot — agent health', () => {
+  it('emits a health scope when a worker starts (health goes [] → [builder])', () => {
+    const prev = snap('default', [], {}, []);
+    const next = snap('default', [], {}, [healthEntry()]);
+    expect(diffSnapshot(prev, next)).toContainEqual({
+      kind: 'health',
+      health: [healthEntry()],
+    });
+  });
+
+  it('emits a health scope when a worker stops (health goes [builder] → [])', () => {
+    const prev = snap('default', [], {}, [healthEntry()]);
+    const next = snap('default', [], {}, []);
+    expect(diffSnapshot(prev, next)).toContainEqual({ kind: 'health', health: [] });
+  });
+
+  it('is silent on heartbeat-age-only change while a worker is still healthy', () => {
+    // Same profile/pid/session/start/stale — only `heartbeatAgeSec` ticks up
+    // (5s → 40s, both below STALE_WORKER_MS). Not a health-content change, so
+    // no scope: idle polls stay ~0 cost (no false positive every tick).
+    const prev = snap('default', [], {}, [healthEntry({ heartbeatAgeSec: 5 })]);
+    const next = snap('default', [], {}, [healthEntry({ heartbeatAgeSec: 40 })]);
+    expect(diffSnapshot(prev, next).some((s) => s.kind === 'health')).toBe(false);
+  });
+
+  it('emits a health scope when a worker crosses the stale boundary', () => {
+    // stale flips false → true (heartbeat age crossed STALE_WORKER_MS). The
+    // `stale` boolean is the heartbeat-age bucket, so this is a health change.
+    const prev = snap('default', [], {}, [healthEntry({ stale: false })]);
+    const next = snap('default', [], {}, [healthEntry({ stale: true })]);
+    expect(diffSnapshot(prev, next)).toContainEqual({
+      kind: 'health',
+      health: [healthEntry({ stale: true })],
+    });
+  });
+
+  it('emits a health scope when a health field other than the age changes', () => {
+    const cases: Partial<AgentHealth>[] = [
+      { workerPid: 9999 },
+      { workerSessionId: 'sess-2' },
+      { runStartedAt: 1_700_000_001 },
+      { runningCardCount: 2 },
+    ];
+    for (const over of cases) {
+      const prev = snap('default', [], {}, [healthEntry()]);
+      const next = snap('default', [], {}, [healthEntry(over)]);
+      const scopes = diffSnapshot(prev, next);
+      expect(scopes.some((s) => s.kind === 'health')).toBe(true);
+      const hs = scopes.find((s) => s.kind === 'health');
+      expect(hs).toMatchObject({ health: [expect.objectContaining(over)] });
+    }
+  });
+
+  it('emits nothing for identical health on an unchanged board', () => {
+    const h = [healthEntry(), healthEntry({ profile: 'reviewer' })];
+    const prev = snap('default', [card('a')], {}, h);
+    const next = snap('default', [card('a')], {}, h);
+    expect(diffSnapshot(prev, next)).toEqual([]);
+  });
+
+  it('still emits a summary scope alongside a changed board and unchanged health', () => {
+    const prev = snap('default', [card('a')], { runningCount: 0 }, [healthEntry()]);
+    const next = snap('default', [card('a')], { runningCount: 1 }, [healthEntry()]);
+    // Health unchanged → only the summary scope, matching prior behavior.
+    expect(diffSnapshot(prev, next)).toEqual([{ kind: 'summary' }]);
   });
 });

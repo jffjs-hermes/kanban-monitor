@@ -116,6 +116,20 @@ describe('wire framing (§4)', () => {
     )).toEqual({ name: 'cards', data: { upserts: [fakeCardView], removedIds: ['t2'] } });
     expect(sseWireEvent({ seq: 1, at: 1, scope: { kind: 'card', taskId: 't9' } }, fakeSnapshot))
       .toEqual({ name: 'card', data: { taskId: 't9' } });
+    // Health carries its own array — no snapshot dependency.
+    const fakeHealth = [{
+      profile: 'builder',
+      runningCardCount: 1,
+      workerPid: 1,
+      workerSessionId: 's',
+      runStartedAt: 1,
+      heartbeatAgeSec: 1,
+      stale: false,
+    }];
+    expect(sseWireEvent(
+      { seq: 1, at: 1, scope: { kind: 'health', health: fakeHealth } },
+      null,
+    )).toEqual({ name: 'health', data: fakeHealth });
   });
 
   it('sseWireEvent returns null when a reset payload cannot be resolved', () => {

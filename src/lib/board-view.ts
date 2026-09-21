@@ -6,6 +6,7 @@
 // fixtures, without a browser (spec §7 "vitest component/SSE-consumer").
 
 import type {
+  AgentHealth,
   BoardSlug,
   BoardSnapshot,
   BoardSummary,
@@ -42,6 +43,7 @@ export type BoardEventName =
   | 'hello'
   | 'reset'
   | 'summary'
+  | 'health'
   | 'cards'
   | 'card'
   | 'ping'
@@ -178,6 +180,7 @@ function reconcile(
  *
  *   reset   → replace the whole snapshot (spec §4: initial/reconnect/DB swap)
  *   summary → merge the strip into the existing snapshot
+ *   health  → merge per-profile worker health into the existing snapshot
  *   cards   → upsert/remove cards in place (spec §4), re-sorted
  *   card    → detail-relevant tick only; no board re-render (drawer refetches)
  *   ping    → keep-alive; just updates "last updated"
@@ -234,6 +237,20 @@ export function reduceBoard(
       return {
         ...state,
         snapshot: { ...state.snapshot, summary },
+        seq: seq ?? state.seq,
+        lastEventAt: at,
+      };
+    }
+    case 'health': {
+      // Merge fresh per-profile worker health into the existing snapshot,
+      // preserving every other field (analogous to the `summary` case). No
+      // full reset — the panel's ages keep ticking client-side; this just
+      // brings fresher source values when a worker starts/stops/crosses stale.
+      const health = data as AgentHealth[];
+      if (!state.snapshot) return state;
+      return {
+        ...state,
+        snapshot: { ...state.snapshot, health },
         seq: seq ?? state.seq,
         lastEventAt: at,
       };

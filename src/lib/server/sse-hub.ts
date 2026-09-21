@@ -97,21 +97,24 @@ export function createSseHub(): SseHub {
  * resolved (e.g. a `reset` before any snapshot exists), which the caller skips.
  *
  * Wire shapes (§4):
- *   reset  -> full BoardSnapshot
- *   summary-> BoardSummary
- *   cards  -> { upserts, removedIds }
- *   card   -> { taskId }
+ *   reset   -> full BoardSnapshot
+ *   summary -> BoardSummary
+ *   health  -> AgentHealth[] (scope carries the array itself)
+ *   cards   -> { upserts, removedIds }
+ *   card    -> { taskId }
  */
 export function sseWireEvent(
   evt: SseEvent,
   snapshot: BoardSnapshot | null,
-): { name: 'reset' | 'summary' | 'cards' | 'card'; data: unknown } | null {
+): { name: 'reset' | 'summary' | 'health' | 'cards' | 'card'; data: unknown } | null {
   const s = evt.scope;
   switch (s.kind) {
     case 'reset':
       return snapshot ? { name: 'reset', data: snapshot } : null;
     case 'summary':
       return snapshot ? { name: 'summary', data: snapshot.summary } : null;
+    case 'health':
+      return { name: 'health', data: s.health };
     case 'cards':
       return { name: 'cards', data: { upserts: s.upserts, removedIds: s.removedIds } };
     case 'card':
