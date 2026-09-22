@@ -32,7 +32,7 @@ Type=simple
 # The built adapter-node output lives in ./build; `bun` (not node) is required
 # so the server's `bun:sqlite` imports resolve at runtime.
 WorkingDirectory=/home/jeff/Projects/kanban-monitor
-ExecStart=/home/jeff/.bun/bin/bun build/index.js
+ExecStart=/home/jeff/.bun/bin/bun --bun scripts/serve-with-healthwatch.ts
 Restart=on-failure
 RestartSec=2
 
