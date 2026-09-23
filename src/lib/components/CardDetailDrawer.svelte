@@ -12,6 +12,7 @@
   // the × button all close it.
   import { drawer, closeDrawer, openDrawer } from '$lib/card-drawer';
   import { renderMarkdown } from '$lib/markdown';
+  import { prettyJson, renderDiffLines, renderMode, type DiffLine } from '$lib/transcript-render';
   import type { CardDetail, RunRow, TaskStatus, TranscriptEvent } from '$lib/types';
   import { findPrUrl } from '$lib/pr-link';
 
@@ -91,6 +92,16 @@
     if (e.kind === 'tool-call') return 'text-link';
     if (e.kind === 'tool-result') return 'text-success';
     if (e.kind === 'heartbeat') return 'text-faint';
+    return 'text-foreground';
+  }
+
+  // Color one classified diff line. Rendered through Svelte as escaped text
+  // nodes inside a `<pre>`; the class is the only markup we add per line.
+  function diffLineClass(kind: DiffLine['kind']): string {
+    if (kind === 'hunk') return 'text-link';
+    if (kind === 'add') return 'text-success';
+    if (kind === 'del') return 'text-danger';
+    if (kind === 'meta') return 'text-faint';
     return 'text-foreground';
   }
 
@@ -287,11 +298,28 @@
                     <span class={`shrink-0 font-semibold ${eventClass(e)}`}>{eventLabel(e)}</span>
                   </div>
                   {#if e.text}
+                    {#snippet eventBody()}
+                      {@const mode = renderMode(e.kind, e.text)}
+                      {#if mode === 'markdown'}
+                        <div class="markdown-body mt-1">{@html renderMarkdown(e.text)}</div>
+                      {:else if mode === 'json'}
+                        <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{prettyJson(e.text) ?? e.text}</pre>
+                      {:else if mode === 'diff'}
+                        <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px]">
+                          {#each renderDiffLines(e.text) as l, i (i)}
+                            <div class={diffLineClass(l.kind)}>{l.text}</div>
+                          {/each}
+                        </pre>
+                      {:else}
+                        <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{e.text}</pre>
+                      {/if}
+                    {/snippet}
                     {#if e.truncated && !expanded.has(e.seq)}
-                      <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{e.text}</pre>
+                      {@render eventBody()}
                       <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">show more…</button>
                     {:else}
-                      <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground" data-expanded={e.truncated && expanded.has(e.seq)}>{e.text}{#if e.truncated}<span class="text-faint"> …</span>{/if}</pre>
+                      {@render eventBody()}
+                      {#if e.truncated}<span class="text-faint"> …</span>{/if}
                       {#if e.truncated && expanded.has(e.seq)}
                         <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">hide</button>
                       {/if}
