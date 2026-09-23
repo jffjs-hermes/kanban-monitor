@@ -30,6 +30,15 @@
   let transcriptAuth = $state(false); // true when the last fetch 401'd
   let expanded = $state<Set<number>>(new Set());
 
+  // Client-side display bounding. The server returns full event text (so JSON
+  // renders formatted and show more reveals everything); here we visually clamp
+  // long bodies to a bounded preview and let show more/hide reveal the rest via
+  // the CSS clamp below.
+  const PREVIEW_CHARS = 2000;
+  function previewable(e: { text: string }): boolean {
+    return e.text.length > PREVIEW_CHARS;
+  }
+
   function persistToken() {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);
@@ -314,15 +323,17 @@
                         <pre class="m-0 mt-1 break-words font-[inherit] whitespace-pre-wrap text-[13px] text-foreground">{e.text}</pre>
                       {/if}
                     {/snippet}
-                    {#if e.truncated && !expanded.has(e.seq)}
-                      {@render eventBody()}
-                      <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">show more…</button>
+                    {#if previewable(e)}
+                      <div class="event-clamp" class:clamped={!expanded.has(e.seq)}>
+                        {@render eventBody()}
+                      </div>
+                      {#if expanded.has(e.seq)}
+                        <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">hide</button>
+                      {:else}
+                        <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">show more…</button>
+                      {/if}
                     {:else}
                       {@render eventBody()}
-                      {#if e.truncated}<span class="text-faint"> …</span>{/if}
-                      {#if e.truncated && expanded.has(e.seq)}
-                        <button class="mt-1 cursor-pointer rounded border border-default bg-transparent px-2 py-0.5 text-[12px] text-link hover:bg-accent-tint" onclick={() => toggleExpand(e.seq)} type="button">hide</button>
-                      {/if}
                     {/if}
                   {/if}
                 </li>
@@ -428,3 +439,14 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Client-side display bound for long transcript bodies: a bounded preview
+     unless expanded; show more/hide toggles `clamped` to reveal full text. */
+  .event-clamp {
+    overflow: hidden;
+  }
+  .event-clamp.clamped {
+    max-height: 320px;
+  }
+</style>
