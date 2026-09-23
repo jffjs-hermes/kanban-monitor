@@ -6,8 +6,8 @@
 //         never accepts a session id from the caller.
 //   §4  — reads the owning profile's `state.db` (sessions + messages) and
 //         degrades gracefully when the store/session is missing.
-//   §5  — events are ordered + bounded; large payloads are truncated (not
-//         dumped) and the list is capped.
+//   §5  — events are ordered + bounded; bodies are returned in full (the
+//         client bounds each for display) and the list is capped at MAX_EVENTS.
 //   read-only — the profile store is opened readonly.
 //
 // Fixture layout mirrors the real deploy: under $HERMES_HOME a board
@@ -21,7 +21,7 @@ import { join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 
 import { openReadonly } from './data-access';
-import { readCardTranscript, MAX_PAYLOAD_CHARS } from './transcript';
+import { readCardTranscript } from './transcript';
 
 const BOARD_SCHEMA = `
 CREATE TABLE tasks (
@@ -267,13 +267,13 @@ describe('readCardTranscript — graceful absence / missing store (§4)', () => 
 });
 
 describe('readCardTranscript — ordering + bounding (§5)', () => {
-  it('truncates an oversized tool-result payload to MAX_PAYLOAD_CHARS (not dumped)', () => {
+  it('returns an oversized tool-result payload in full (no server-side truncation)', () => {
     fixture = makeBoard(
       [['a', 'builder', 'done']],
       [[1, 'a', 'builder', JSON.stringify({ worker_session_id: 's-big' })]],
     );
     process.env.HERMES_HOME = fixture.home;
-    const big = 'x'.repeat(MAX_PAYLOAD_CHARS + 500);
+    const big = 'x'.repeat(5000);
     makeProfileStore(fixture.home, 'builder', 's-big', [
       [1, 'tool', big, null, 'terminal', 1],
     ]);
@@ -281,9 +281,32 @@ describe('readCardTranscript — ordering + bounding (§5)', () => {
     const r = readCardTranscript(db, 'a')!;
     db.close();
     const ev = r.events[0];
-    expect(ev.truncated).toBe(true);
-    expect(ev.text.length).toBe(MAX_PAYLOAD_CHARS);
-    expect(r.truncated).toBe(true);
+    expect(ev.text).toBe(big);
+    expect(ev.truncated).toBe(false);
+    // Event text is returned whole: the list-level flag stays false too.
+    expect(r.truncated).toBe(false);
+  });
+
+  it('returns oversized JSON payloads whole so they still parse as JSON', () => {
+    fixture = makeBoard(
+      [['a', 'builder', 'done']],
+      [[1, 'a', 'builder', JSON.stringify({ worker_session_id: 's-json' })]],
+    );
+    process.env.HERMES_HOME = fixture.home;
+    // A single valid JSON document comfortably past any old 2000-char slice
+    // budget — served whole so it still parses as JSON on the client.
+    const big = JSON.stringify({ ok: true, items: Array.from({ length: 100 }, (_, i) => `item-${i}-` + 'y'.repeat(30)) });
+    expect(big.length).toBeGreaterThan(2000);
+    makeProfileStore(fixture.home, 'builder', 's-json', [
+      [1, 'tool', big, null, 'kanban_show', 1],
+    ]);
+    const db = openReadonly(fixture.dbPath);
+    const r = readCardTranscript(db, 'a')!;
+    db.close();
+    const ev = r.events[0];
+    expect(ev.text).toBe(big);
+    expect(ev.truncated).toBe(false);
+    expect(JSON.parse(ev.text).items.length).toBe(100); // still parses as JSON
   });
 
   it('caps the event list, keeping the latest events, and flags truncated', () => {
@@ -305,23 +328,7 @@ describe('readCardTranscript — ordering + bounding (§5)', () => {
     expect(r.truncated).toBe(true);
   });
 
-  it('respects a custom payload budget', () => {
-    fixture = makeBoard(
-      [['a', 'builder', 'done']],
-      [[1, 'a', 'builder', JSON.stringify({ worker_session_id: 's-custom' })]],
-    );
-    process.env.HERMES_HOME = fixture.home;
-    makeProfileStore(fixture.home, 'builder', 's-custom', [
-      [1, 'user', 'abcdefgh', null, null, 1],
-    ]);
-    const db = openReadonly(fixture.dbPath);
-    const r = readCardTranscript(db, 'a', { maxPayloadChars: 4 })!;
-    db.close();
-    expect(r.events[0].text).toBe('abcd');
-    expect(r.events[0].truncated).toBe(true);
-  });
-
-  it('does not truncate small payloads (no truncated flag, full text)', () => {
+  it('keeps small payloads whole (no truncated flag, full text)', () => {
     fixture = makeBoard(
       [['a', 'builder', 'done']],
       [[1, 'a', 'builder', JSON.stringify({ worker_session_id: 's-small' })]],

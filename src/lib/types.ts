@@ -156,21 +156,25 @@ export interface TranscriptEvent {
   role: string;
   /** Tool name for tool-call / tool-result / heartbeat events, else null. */
   toolName: string | null;
-  /** Body text (user/assistant content, tool arguments, or bounded tool result). */
+  /** Body text (user/assistant content, tool arguments, or a full tool result). */
   text: string;
-  /** True when this event's text was truncated to the bounded payload budget. */
+  /**
+   * Whether this event's text was truncated. The server returns full payloads
+   * and never sets this; display truncation is handled client-side, so this is
+   * always `false` from the transcript endpoint.
+   */
   truncated: boolean;
 }
 
 /**
  * Result of reading a card's transcript (transcript viewer). `events` is
- * ordered oldest→newest (by message id) and bounded: payloads are truncated to
- * `MAX_PAYLOAD_CHARS` and the list to `MAX_EVENTS`, with `truncated` set when
- * anything was cut.
+ * ordered oldest→newest (by message id); bodies are returned in full (the
+ * client bounds each for display). The list is capped at `MAX_EVENTS`, with
+ * `truncated` set only when events were dropped past that cap.
  */
 export interface TranscriptResult {
   events: TranscriptEvent[];
-  /** True when any event body was truncated OR events were dropped past `MAX_EVENTS`. */
+  /** True when events were dropped past `MAX_EVENTS` (oldest dropped). */
   truncated: boolean;
   /** The session id recorded on the card's own run (never user input). */
   sessionId: string | null;

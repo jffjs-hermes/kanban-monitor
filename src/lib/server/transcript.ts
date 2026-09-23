@@ -19,9 +19,11 @@
 // Missing/moved/disappeared session data degrades gracefully to an empty
 // result (the drawer renders a "no transcript" note) rather than throwing.
 //
-// Bounding: every event's body text is truncated to a bounded character
-// budget (large tool-result payloads are never dumped in full), and the event
-// list itself is capped — a monitor, not a log dumper (locked decision §5).
+// Bounding: the event list is capped — a monitor, not a log dumper (locked
+// decision §5). Event body text is returned in full so the client can render
+// structured payloads (JSON) and reveal everything via show more; the client
+// bounds each body for display. Truncating JSON server-side cut mid-string and
+// broke formatting, so per-event slicing was removed.
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,8 +34,6 @@ import { hermesHome } from './board-discover';
 import { listRuns, listTasks } from './data-access';
 import type { TranscriptEvent, TranscriptResult } from '../types';
 
-/** Per-event body-text cap (locked decision §5: bounded, "show more" on text). */
-export const MAX_PAYLOAD_CHARS = 2000;
 /** Hard cap on the number of events returned (oldest dropped; flagged truncated). */
 export const MAX_EVENTS = 1000;
 
@@ -52,11 +52,6 @@ interface ParsedToolCall {
   function?: { name?: string; arguments?: string };
   name?: string;
   id?: string;
-}
-
-function truncate(text: string, max: number): { text: string; truncated: boolean } {
-  if (text.length <= max) return { text, truncated: false };
-  return { text: text.slice(0, max), truncated: true };
 }
 
 function parseToolCalls(raw: string | null): ParsedToolCall[] {
@@ -81,24 +76,23 @@ function callName(tc: ParsedToolCall): string | null {
  *   - `assistant` rows  → a body-text event when `content` is non-blank, plus
  *     one `tool-call` event per tool call in `tool_calls`.
  *   - `tool` rows       → a `heartbeat` event when the tool name carries
- *     "heartbeat", else a `tool-result` event (body = the result payload,
- *     truncated to the bounded budget).
+ *     "heartbeat", else a `tool-result` event (body = the full result payload).
+ * Per-event text is never sliced: bodies are returned whole so the client can
+ * render structured payloads (JSON) and reveal the full text via show more.
  */
-function foldMessage(row: MessageRow, max: number): Omit<TranscriptEvent, 'seq'>[] {
+function foldMessage(row: MessageRow): Omit<TranscriptEvent, 'seq'>[] {
   const at = typeof row.timestamp === 'number' ? row.timestamp : null;
   const out: Omit<TranscriptEvent, 'seq'>[] = [];
 
   if (row.role === 'tool') {
-    const body = row.content ?? '';
-    const truncatedBody = truncate(body, max);
     const isHeartbeat = (row.tool_name ?? '').toLowerCase().includes('heartbeat');
     out.push({
       at,
       kind: isHeartbeat ? 'heartbeat' : 'tool-result',
       role: 'tool',
       toolName: row.tool_name,
-      text: truncatedBody.text,
-      truncated: truncatedBody.truncated,
+      text: row.content ?? '',
+      truncated: false,
     });
     return out;
   }
@@ -106,37 +100,33 @@ function foldMessage(row: MessageRow, max: number): Omit<TranscriptEvent, 'seq'>
   const body = row.content ?? '';
 
   if (row.role === 'user') {
-    const t = truncate(body, max);
-    out.push({ at, kind: 'user', role: 'user', toolName: null, text: t.text, truncated: t.truncated });
+    out.push({ at, kind: 'user', role: 'user', toolName: null, text: body, truncated: false });
     return out;
   }
 
   // assistant: body text (if any) then one tool-call event per call.
   if (row.role === 'assistant') {
     if (body.trim().length > 0) {
-      const t = truncate(body, max);
-      out.push({ at, kind: 'assistant', role: 'assistant', toolName: null, text: t.text, truncated: t.truncated });
+      out.push({ at, kind: 'assistant', role: 'assistant', toolName: null, text: body, truncated: false });
     }
     for (const tc of parseToolCalls(row.tool_calls)) {
       const name = callName(tc);
       // Tool arguments can be large (a full command/query); bind them.
       const args = tc.function?.arguments ?? '';
-      const t = truncate(args, max);
       out.push({
         at,
         kind: 'tool-call',
         role: 'assistant',
         toolName: name,
-        text: t.text,
-        truncated: t.truncated,
+        text: args,
+        truncated: false,
       });
     }
     return out;
   }
 
   // Unknown role — carry the body through so nothing is silently dropped.
-  const t = truncate(body, max);
-  out.push({ at, kind: 'assistant', role: row.role, toolName: null, text: t.text, truncated: t.truncated });
+  out.push({ at, kind: 'assistant', role: row.role, toolName: null, text: body, truncated: false });
   return out;
 }
 
@@ -151,9 +141,8 @@ function foldMessage(row: MessageRow, max: number): Omit<TranscriptEvent, 'seq'>
 export function readCardTranscript(
   db: Database,
   taskId: string,
-  opts?: { maxPayloadChars?: number; maxEvents?: number },
+  opts?: { maxEvents?: number },
 ): TranscriptResult | null {
-  const maxPayloadChars = opts?.maxPayloadChars ?? MAX_PAYLOAD_CHARS;
   const maxEvents = opts?.maxEvents ?? MAX_EVENTS;
 
   const tasks = listTasks(db);
@@ -214,13 +203,15 @@ export function readCardTranscript(
 
     let seq = 0;
     for (const row of kept) {
-      for (const base of foldMessage(row, maxPayloadChars)) {
+      for (const base of foldMessage(row)) {
         seq += 1;
         events.push({ seq, ...base });
       }
     }
 
-    const truncated = events.some((e) => e.truncated) || eventsDropped;
+    // Event text is never sliced server-side; `truncated` reflects only the
+    // event-list cap (oldest events dropped past `MAX_EVENTS`).
+    const truncated = eventsDropped;
     return { events, truncated, sessionId, hasTranscript: true, profile };
   } catch {
     // Store became unreadable mid-read → graceful empty.
