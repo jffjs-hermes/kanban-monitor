@@ -241,11 +241,12 @@
 
 {#if open && detail}
   <div class="fixed inset-0 z-50 flex justify-end bg-scrim" onclick={onBackdropClose} onkeydown={onBackdropKey} role="presentation">
-    <div class="flex h-full w-[min(560px,94vw)] animate-drawer-slide flex-col border-l border-default bg-surface shadow-[-12px_0_32px_var(--scrim)]" role="dialog" aria-modal="true" aria-label="Card detail" tabindex="-1">
+    <div class="flex h-full w-[min(800px,94vw)] animate-drawer-slide flex-col border-l border-default bg-surface shadow-[-12px_0_32px_var(--scrim)]" role="dialog" aria-modal="true" aria-label="Card detail" tabindex="-1">
       <header class="flex items-start justify-between gap-3 border-b border-default p-[18px_20px]">
         <div class="hd">
           <h2 class="m-0 mb-2.5 break-words text-[18px] leading-[1.3] text-foreground">{detail.card.title}</h2>
           <div class="flex flex-wrap gap-2">
+            <span class="font-mono rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-muted">{detail.card.id}</span>
             <span class="rounded-full border border-accent-strong bg-surface-2 px-2.5 py-0.5 text-[12px] text-link-soft">{STATUS_LABEL[detail.card.status] ?? detail.card.status}</span>
             {#if detail.card.assignee}<span class="rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-link-soft">{detail.card.assignee}</span>{/if}
             <span class="rounded-full border border-default bg-surface-2 px-2.5 py-0.5 text-[12px] text-muted">p{detail.card.priority}</span>
@@ -433,7 +434,7 @@
   </div>
 {:else if open}
   <div class="fixed inset-0 z-50 flex justify-end bg-scrim" onclick={onBackdropClose} onkeydown={onBackdropKey} role="presentation">
-    <div class="flex h-full w-[min(560px,94vw)] flex-col border-l border-default bg-surface p-[4px_20px] shadow-[-12px_0_32px_var(--scrim)]" role="dialog" aria-modal="true" aria-label="Card detail">
+    <div class="flex h-full w-[min(800px,94vw)] flex-col border-l border-default bg-surface p-[4px_20px] shadow-[-12px_0_32px_var(--scrim)]" role="dialog" aria-modal="true" aria-label="Card detail">
       <header class="flex items-start justify-between gap-3 border-b border-default p-[18px_20px]"><h2 class="m-0 text-foreground">Card detail</h2><button class="flex-none cursor-pointer rounded-md border border-default bg-transparent text-[18px] leading-none text-muted hover:border-border-strong hover:text-foreground" onclick={closeDrawer} aria-label="Close" type="button" style="width:30px;height:30px">×</button></header>
       <p class="text-[14px] text-muted">{loading ? 'Loading…' : error ?? 'No detail.'}</p>
     </div>

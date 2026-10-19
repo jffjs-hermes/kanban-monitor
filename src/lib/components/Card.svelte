@@ -130,6 +130,7 @@
     </div>
   {/if}
   <div class="mt-2.5 flex flex-wrap gap-2.5 text-[12px] text-muted">
+    <span class="rounded-[10px] border border-default bg-surface px-[7px] font-mono text-faint">{card.id}</span>
     {#if card.assignee}<span class="text-link-soft">{card.assignee}</span>{/if}
     <span class="rounded-[10px] border border-default bg-surface px-[7px]">p{card.priority}</span>
     {#if card.status === 'running' && card.elapsedMs !== null}
