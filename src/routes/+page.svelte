@@ -54,7 +54,9 @@
   }
 
   let boards: { slug: BoardSlug }[] = $state([]);
-  let showMore = $state(false);
+  // All eight columns render by default (spec §1.2). The toggle collapses the
+  // triage/todo/archived subset behind a button; `collapsed` flags stay as-is.
+  let showCollapsed = $state(true);
   let now = $state(Date.now()); // ticking clock for elapsed + footer
 
   // Restore the persisted selection (or default) and start streaming. Read the
@@ -114,7 +116,7 @@
 </script>
 <svelte:head><title>Kanban Board Monitor</title></svelte:head>
 
-<div class="mx-auto max-w-[1500px] p-7">
+<div class="max-w-full p-7">
   <header class="flex flex-wrap items-center justify-between gap-6 pb-[22px]">
     <div class="brand">
       <h1 class="m-0 text-[26px]">Kanban Board Monitor</h1>
@@ -149,7 +151,7 @@
     />
     <main class="flex min-w-0 flex-nowrap items-stretch gap-3.5 overflow-x-auto">
       {#each COLUMN_DEFS as def (def.status)}
-        {#if !def.collapsed || showMore}
+        {#if !def.collapsed || showCollapsed}
           <BoardColumn
             label={def.label}
             cards={groups[def.status] ?? []}
@@ -163,10 +165,10 @@
     {#if COLUMN_DEFS.some((d) => d.collapsed)}
       <button
         class="mt-[18px] cursor-pointer rounded-md border border-default bg-surface px-3.5 py-2 text-muted hover:text-foreground"
-        onclick={() => (showMore = !showMore)}
+        onclick={() => (showCollapsed = !showCollapsed)}
         type="button"
       >
-        {showMore ? 'hide' : 'Show'} more columns (triage / todo / archived)
+        {showCollapsed ? 'Hide' : 'Show'} collapsed columns (triage / todo / archived)
       </button>
     {/if}
   {:else}
