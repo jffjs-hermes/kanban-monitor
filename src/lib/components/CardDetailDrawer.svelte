@@ -13,6 +13,7 @@
   import { drawer, closeDrawer, openDrawer } from '$lib/card-drawer';
   import { renderMarkdown } from '$lib/markdown';
   import { prettyJson, renderDiffLines, renderMode, type DiffLine } from '$lib/transcript-render';
+  import { cardElId } from '$lib/board-view';
   import type { CardDetail, RunRow, TaskStatus, TranscriptEvent } from '$lib/types';
   import { findPrUrl } from '$lib/pr-link';
 
@@ -183,7 +184,7 @@
   $effect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDrawer();
+      if (e.key === 'Escape') closeAndRestoreFocus();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -193,10 +194,21 @@
     if (e.target === e.currentTarget) closeDrawer();
   }
 
+  // Escape (and keyboard-close via the backdrop) closes the drawer and returns
+  // focus to the card it was opened from — that card is the board's roving
+  // tab stop, so a keyboard user lands back on the selection (Card A). A mouse
+  // close (× / backdrop click) leaves focus where the pointer is.
+  function closeAndRestoreFocus() {
+    const taskId = st.taskId;
+    closeDrawer();
+    const el = taskId ? document.getElementById(cardElId(taskId)) : null;
+    el?.focus();
+  }
+
   function onBackdropKey(e: KeyboardEvent) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      closeDrawer();
+      closeAndRestoreFocus();
     }
   }
 

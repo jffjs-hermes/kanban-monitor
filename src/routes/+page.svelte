@@ -7,8 +7,15 @@
   // cards re-render in place when a delta arrives — no manual refresh. Board
   // switch re-targets the stream + snapshot and persists in localStorage (§5.0).
   import { board, selectBoard } from '$lib/board-client';
-  import { openDrawer, closeDrawer } from '$lib/card-drawer';
-  import { COLUMN_DEFS, groupByStatus } from '$lib/board-view';
+  import { drawer, openDrawer, closeDrawer } from '$lib/card-drawer';
+  import {
+    cardElId,
+    COLUMN_DEFS,
+    groupByStatus,
+    moveFocus,
+    visibleCardIds,
+    type FocusDirection,
+  } from '$lib/board-view';
   import BoardColumn from '$lib/components/BoardColumn.svelte';
   import SummaryStrip from '$lib/components/SummaryStrip.svelte';
   import AgentHealthPanel from '$lib/components/AgentHealthPanel.svelte';
@@ -59,6 +66,16 @@
   let showCollapsed = $state(true);
   let now = $state(Date.now()); // ticking clock for elapsed + footer
 
+  // Keyboard navigation (Card A) — roving tabindex. `focusedId` names the one
+  // card in the tab order; arrow keys move it one step over the rendered grid
+  // (via `moveFocus` on the visible layout) and `Enter`/`Space` opens its
+  // drawer. `null` means "no explicit selection": the first card is then the
+  // tab stop, so Tab always lands on the board.
+  let focusedId = $state<string | null>(null);
+  // Per-column "show more" expansion, lifted from BoardColumn so the layout
+  // used for arrow movement matches exactly what is rendered.
+  let expandedCols = $state<Record<string, boolean>>({});
+
   // Restore the persisted selection (or default) and start streaming. Read the
   // initial value once into a plain const so `selectBoard` runs exactly once on
   // setup without capturing the reactive binding.
@@ -100,12 +117,50 @@
   function onSelect(slug: BoardSlug) {
     current = slug;
     closeDrawer(); // a different board invalidates any open card detail
+    focusedId = null; // and any keyboard selection
+    expandedCols = {};
     try {
       localStorage.setItem(LS_KEY, slug);
     } catch {
       /* storage unavailable — session-only */
     }
     selectBoard(slug);
+  }
+
+  // Keyboard navigation (Card A). The visible layout: one column per rendered
+  // column def, holding the ids the column actually shows (respecting the
+  // newest-N limit and its expansion toggle), in render order.
+  const groups = $derived(
+    $board.snapshot ? groupByStatus($board.snapshot.cards) : groupByStatus([]),
+  );
+  const focusColumns = $derived(
+    COLUMN_DEFS.filter((d) => !d.collapsed || showCollapsed).map((d) =>
+      visibleCardIds(groups[d.status] ?? [], expandedCols[d.status] ?? false),
+    ),
+  );
+  // Roving tab stop: the selected card when it is still rendered, else the
+  // first card (default), else nothing on an empty board.
+  const effectiveFocusId = $derived.by(() => {
+    const fid = focusedId;
+    return fid !== null && focusColumns.some((col) => col.includes(fid))
+      ? fid
+      : (focusColumns[0]?.[0] ?? null);
+  });
+
+  function handleNav(dir: FocusDirection) {
+    if ($drawer.open) return; // never move the selection under an open drawer
+    const next = moveFocus(focusColumns, focusedId, dir);
+    if (next !== null && next !== focusedId) {
+      focusedId = next;
+      document.getElementById(cardElId(next))?.focus();
+    }
+  }
+
+  // A click selects the card (roving tab stop follows the mouse) and opens the
+  // detail drawer exactly as before — no behavior regression.
+  function onCardSelect(id: string) {
+    focusedId = id;
+    openDrawer(id, $board.slug);
   }
 
   // Tick the client clock every second (drives elapsed + footer timestamps).
@@ -137,7 +192,6 @@
   </header>
 
   {#if $board.snapshot}
-    {@const groups = groupByStatus($board.snapshot.cards)}
     <SummaryStrip
       summary={$board.snapshot.summary}
       seq={$board.seq}
@@ -155,9 +209,13 @@
           <BoardColumn
             label={def.label}
             cards={groups[def.status] ?? []}
+            expanded={expandedCols[def.status] ?? false}
+            onToggle={() => (expandedCols[def.status] = !expandedCols[def.status])}
             {now}
             frameAt={$board.snapshot.summary.lastSyncedAt}
-            onSelect={(id) => openDrawer(id, $board.slug)}
+            focusedId={effectiveFocusId}
+            onNav={handleNav}
+            onSelect={onCardSelect}
           />
         {/if}
       {/each}
