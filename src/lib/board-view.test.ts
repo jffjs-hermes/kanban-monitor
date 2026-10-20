@@ -7,6 +7,8 @@ import {
   cardElId,
   COLUMN_DEFS,
   DEFAULT_COLUMN_LIMIT,
+  distinctAssignees,
+  filterByAssignee,
   formatDuration,
   groupByStatus,
   initialBoardState,
@@ -393,6 +395,56 @@ describe('Impl — stalled / credit-burn alerting', () => {
     expect(formatDuration(45_000)).toBe('45s');
     expect(formatDuration(185_000)).toBe('3m 5s');
     expect(formatDuration(3 * 3600_000 + 5 * 60_000)).toBe('3h 5m');
+  });
+});
+
+describe('assignee filter (Card B)', () => {
+  it('distinctAssignees dedupes and sorts, ignoring unassigned cards', () => {
+    const cards = [
+      card('a', { assignee: 'reviewer' }),
+      card('b', { assignee: 'builder' }),
+      card('c', { assignee: 'reviewer' }), // duplicate
+      card('d'), // null assignee
+      card('e', { assignee: '' }), // empty assignee
+    ];
+    expect(distinctAssignees(cards)).toEqual(['builder', 'reviewer']);
+    expect(distinctAssignees([])).toEqual([]);
+  });
+
+  it('filterByAssignee with null ("All") returns every card, incl. unassigned', () => {
+    const cards = [card('a', { assignee: 'builder' }), card('b'), card('c', { assignee: 'reviewer' })];
+    expect(filterByAssignee(cards, null).map((c) => c.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps only cards matching the named assignee, across statuses', () => {
+    const cards = [
+      card('r1', { assignee: 'builder', status: 'ready' }),
+      card('run', { assignee: 'builder', status: 'running' }),
+      card('rev', { assignee: 'reviewer', status: 'review' }),
+      card('d1', { assignee: 'builder', status: 'done' }),
+    ];
+    const kept = filterByAssignee(cards, 'builder').map((c) => c.id);
+    expect(kept).toEqual(['r1', 'run', 'd1']);
+  });
+
+  it('excludes null-assignee cards when a specific assignee is selected', () => {
+    const cards = [card('a', { assignee: 'builder' }), card('b')];
+    expect(filterByAssignee(cards, 'builder').map((c) => c.id)).toEqual(['a']);
+    expect(filterByAssignee(cards, 'nobody')).toEqual([]);
+  });
+
+  it('feeds groupByStatus: column membership reflects the filter', () => {
+    const cards = [
+      card('ra', { assignee: 'builder', status: 'ready' }),
+      card('rb', { assignee: 'reviewer', status: 'ready' }),
+      card('d1', { assignee: 'builder', status: 'done' }),
+    ];
+    // The page calls `groupByStatus(filterByAssignee(cards, filter))`, so column
+    // lists (and thus the count badges + empty states) follow the filter.
+    const g = groupByStatus(filterByAssignee(cards, 'builder'));
+    expect(g.ready!.map((c) => c.id)).toEqual(['ra']);
+    expect(g.done!.map((c) => c.id)).toEqual(['d1']);
+    expect(g.review).toEqual([]);
   });
 });
 
