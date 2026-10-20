@@ -16,10 +16,12 @@
   // Running.
   import LivenessDot from './LivenessDot.svelte';
   import {
+    cardElId,
     formatDuration,
     isStalled,
     recentTransition,
     stallAgeMs,
+    type FocusDirection,
   } from '../board-view';
   import type { CardView, TaskStatus } from '../types';
 
@@ -27,12 +29,18 @@
     card,
     now,
     frameAt,
+    focused = false,
     onSelect,
+    onNav,
   }: {
     card: CardView;
     now: number;
     frameAt: number;
+    // Roving tabindex: the focused card is the only one in the tab order
+    // (tabindex=0); every other card is tabindex=-1 and reachable via arrows.
+    focused?: boolean;
     onSelect?: (id: string) => void;
+    onNav?: (dir: FocusDirection) => void;
   } = $props();
 
   const stalled = $derived(isStalled(card));
@@ -46,6 +54,18 @@
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       handleClick();
+      return;
+    }
+    // Arrow keys move the roving selection; the page resolves the target and
+    // moves DOM focus (Keyboard navigation Card A).
+    const dir: FocusDirection | null =
+      e.key === 'ArrowUp' ? 'up' :
+      e.key === 'ArrowDown' ? 'down' :
+      e.key === 'ArrowLeft' ? 'left' :
+      e.key === 'ArrowRight' ? 'right' : null;
+    if (dir) {
+      e.preventDefault();
+      onNav?.(dir);
     }
   }
 
@@ -87,6 +107,8 @@
 </script>
 
 <article
+  id={cardElId(card.id)}
+  data-card-id={card.id}
   class="mb-2.5 rounded-md border border-default bg-surface-2 p-3 text-[14px]"
   class:border-l-3={card.status === 'running' || stalled}
   class:border-l-accent={card.status === 'running' && !stalled}
@@ -97,7 +119,7 @@
   class:hover:bg-surface-3={!!onSelect}
   title={card.title}
   role={onSelect ? 'button' : undefined}
-  tabindex={onSelect ? 0 : undefined}
+  tabindex={onSelect ? (focused ? 0 : -1) : undefined}
   onclick={handleClick}
   onkeydown={handleKey}
 >
@@ -147,3 +169,13 @@
     {/if}
   </div>
 </article>
+
+<style>
+  /* Keyboard navigation (roving tabindex): the card article is the focusable
+     button, so outline the card itself — a visible "focused" ring for arrow
+     moves and Tab, without a persistent outline on mouse use. */
+  article:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+</style>

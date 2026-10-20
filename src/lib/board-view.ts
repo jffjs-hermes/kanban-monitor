@@ -113,6 +113,95 @@ export function takeNewest(cards: CardView[], limit: number = DEFAULT_COLUMN_LIM
   return cards.slice(0, Math.max(0, limit));
 }
 
+// --- Keyboard navigation (roving tabindex) ----------------------------------
+//
+// The board keeps exactly one card in the tab order at a time — the "focused"
+// card — and arrow keys move that selection around the rendered grid. All
+// movement math lives here as pure functions so the wrap-around rules are
+// unit-tested without a DOM: the page feeds `moveFocus` the ids each column
+// actually renders, in render order, and applies the result (tabindex swap +
+// DOM focus) to the cards.
+
+/** Arrow-key direction of a focus move on the board. */
+export type FocusDirection = 'up' | 'down' | 'left' | 'right';
+
+/** The card ids a column renders right now, in render order — the navigation
+ * layout for `moveFocus`. Mirrors BoardColumn's own `visible` computation
+ * (newest-N limit unless expanded) so keyboard movement always lands on a card
+ * that is actually on screen. */
+export function visibleCardIds(
+  cards: CardView[],
+  expanded: boolean,
+  limit: number = DEFAULT_COLUMN_LIMIT,
+): string[] {
+  return (expanded ? cards : takeNewest(cards, limit)).map((c) => c.id);
+}
+
+/**
+ * Where the next focused card is when an arrow key moves the selection one
+ * step on a board laid out as `columns` — one array of card ids per visible
+ * column, in render order (empty arrays for columns with no cards).
+ *
+ *   up/down    — previous/next card within the same column, wrapping at the
+ *                edges (first ↔ last); a single-card column stays put.
+ *   left/right — adjacent column at the same row (clamped to the target
+ *                column's length), skipping empty columns and wrapping
+ *                last ↔ first; if every other column is empty, stays put.
+ *   no focus   — `null` or an id that is not in the layout (the focused card
+ *                was removed/streamed away) starts at the first card of the
+ *                first non-empty column, the default roving-tabindex tab stop.
+ *
+ * Returns `null` only when the board has no cards at all.
+ */
+export function moveFocus(
+  columns: string[][],
+  focusedId: string | null,
+  dir: FocusDirection,
+): string | null {
+  let ci = -1;
+  let ri = -1;
+  if (focusedId !== null) {
+    for (let i = 0; i < columns.length; i++) {
+      const j = columns[i].indexOf(focusedId);
+      if (j !== -1) {
+        ci = i;
+        ri = j;
+        break;
+      }
+    }
+  }
+
+  if (ci === -1) {
+    for (let i = 0; i < columns.length; i++) {
+      if (columns[i].length > 0) return columns[i][0];
+    }
+    return null;
+  }
+
+  if (dir === 'up' || dir === 'down') {
+    const col = columns[ci];
+    const n = col.length;
+    if (n <= 1) return col[0];
+    return dir === 'up' ? col[(ri - 1 + n) % n] : col[(ri + 1) % n];
+  }
+
+  const step = dir === 'right' ? 1 : -1;
+  let next = (ci + step + columns.length) % columns.length;
+  while (next !== ci && columns[next].length === 0) {
+    next = (next + step + columns.length) % columns.length;
+  }
+  if (columns[next].length === 0) return focusedId; // no other column has cards
+  return columns[next][Math.min(ri, columns[next].length - 1)];
+}
+
+/** DOM element id for a card article — the roving-tabindex focus target the
+ * board focuses on arrow moves and the drawer returns focus to on Escape.
+ * Card ids are unique within a snapshot, so the id is unique on a rendered
+ * board. */
+export function cardElId(cardId: string): string {
+  return `card-${cardId}`;
+}
+
 // --- Stalled / credit-burn alerting (Impl task) ------------------------------
 //
 // A running card with a stale (or missing) heartbeat is "stalled". We surface

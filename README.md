@@ -109,6 +109,10 @@ Health check: `curl -s http://localhost:8787/api/boards.json`.
   (from `task_events`), run attempts/outcomes (from `task_runs`), comments
   (from `task_comments`), and clickable parent/child links (from `task_links`).
   The open drawer refreshes live when its card's detail changes over SSE.
+- **Keyboard navigation** — arrow keys move a roving card focus across the
+  board (up/down within a column, left/right across columns, wrapping at the
+  edges), `Enter`/`Space` opens the focused card's drawer, and `Escape` closes
+  it and returns focus to that card.
 - **Resilience** — a missing/swapped board file is tolerated (the poller
   reopens it next tick); an empty board renders an empty state rather than
   erroring.

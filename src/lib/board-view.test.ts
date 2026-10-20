@@ -4,12 +4,14 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  cardElId,
   COLUMN_DEFS,
   DEFAULT_COLUMN_LIMIT,
   formatDuration,
   groupByStatus,
   initialBoardState,
   isStalled,
+  moveFocus,
   PRIMARY_COLUMNS,
   recentTransition,
   reduceBoard,
@@ -19,6 +21,7 @@ import {
   stallAgeMs,
   takeNewest,
   TRANSITION_WINDOW_MS,
+  visibleCardIds,
 } from './board-view';
 import type {
   AgentHealth,
@@ -390,5 +393,101 @@ describe('Impl — stalled / credit-burn alerting', () => {
     expect(formatDuration(45_000)).toBe('45s');
     expect(formatDuration(185_000)).toBe('3m 5s');
     expect(formatDuration(3 * 3600_000 + 5 * 60_000)).toBe('3h 5m');
+  });
+});
+
+describe('keyboard navigation — focus movement + wrap-around (Card A)', () => {
+  // Board layout as the page feeds `moveFocus`: one array of visible card ids
+  // per rendered column, in render order. ready(3) running(2) review(1)
+  // blocked(0 — empty) done(5).
+  const BOARD = [
+    ['r1', 'r2', 'r3'],
+    ['run1', 'run2'],
+    ['rev1'],
+    [],
+    ['d1', 'd2', 'd3', 'd4', 'd5'],
+  ];
+
+  it('returns null when the board has no cards at all', () => {
+    expect(moveFocus([], null, 'down')).toBeNull();
+    expect(moveFocus([[], []], null, 'up')).toBeNull();
+    expect(moveFocus([], 'ghost', 'right')).toBeNull();
+  });
+
+  it('starts at the first card of the first non-empty column when nothing is focused', () => {
+    expect(moveFocus(BOARD, null, 'down')).toBe('r1');
+    expect(moveFocus(BOARD, null, 'up')).toBe('r1');
+    expect(moveFocus(BOARD, null, 'left')).toBe('r1'); // any direction anchors
+    // Leading empty columns are skipped to reach the first card.
+    expect(moveFocus([[], ['a']], null, 'down')).toBe('a');
+  });
+
+  it('treats a focused id that is no longer rendered as unset (card removed/collapsed)', () => {
+    expect(moveFocus(BOARD, 'ghost', 'down')).toBe('r1');
+    expect(moveFocus(BOARD, 'gone', 'left')).toBe('r1');
+  });
+
+  it('moves down within a column, wrapping at the bottom edge', () => {
+    expect(moveFocus(BOARD, 'r1', 'down')).toBe('r2');
+    expect(moveFocus(BOARD, 'r2', 'down')).toBe('r3');
+    expect(moveFocus(BOARD, 'r3', 'down')).toBe('r1'); // wrap
+    expect(moveFocus(BOARD, 'd5', 'down')).toBe('d1'); // wrap (tall column)
+  });
+
+  it('moves up within a column, wrapping at the top edge', () => {
+    expect(moveFocus(BOARD, 'r2', 'up')).toBe('r1');
+    expect(moveFocus(BOARD, 'r1', 'up')).toBe('r3'); // wrap
+    expect(moveFocus(BOARD, 'd1', 'up')).toBe('d5'); // wrap
+  });
+
+  it('stays put in a single-card column', () => {
+    expect(moveFocus(BOARD, 'rev1', 'down')).toBe('rev1');
+    expect(moveFocus(BOARD, 'rev1', 'up')).toBe('rev1');
+  });
+
+  it('moves right across columns, preserving the row (clamped)', () => {
+    expect(moveFocus(BOARD, 'r1', 'right')).toBe('run1'); // row 0
+    expect(moveFocus(BOARD, 'r2', 'right')).toBe('run2'); // row 1
+    expect(moveFocus(BOARD, 'r3', 'right')).toBe('run2'); // row 2 clamps to the 2-card column
+    expect(moveFocus(BOARD, 'run2', 'right')).toBe('rev1'); // row 1 clamps to the single review card
+  });
+
+  it('moves left across columns, preserving the row (clamped)', () => {
+    expect(moveFocus(BOARD, 'run1', 'left')).toBe('r1');
+    expect(moveFocus(BOARD, 'run2', 'left')).toBe('r2');
+    expect(moveFocus(BOARD, 'd3', 'left')).toBe('rev1'); // row 2 clamps to the single review card
+  });
+
+  it('skips empty columns when moving sideways', () => {
+    // blocked column (index 3) is empty: right from review lands on done.
+    expect(moveFocus(BOARD, 'rev1', 'right')).toBe('d1');
+    expect(moveFocus(BOARD, 'rev1', 'left')).toBe('run1');
+  });
+
+  it('wraps right from the last column to the first', () => {
+    expect(moveFocus(BOARD, 'd1', 'right')).toBe('r1');
+    expect(moveFocus(BOARD, 'd4', 'right')).toBe('r3'); // row 3 clamps to the 3-card column
+  });
+
+  it('wraps left from the first column to the last', () => {
+    expect(moveFocus(BOARD, 'r1', 'left')).toBe('d1');
+    expect(moveFocus(BOARD, 'r2', 'left')).toBe('d2');
+  });
+
+  it('stays put when no other column has cards', () => {
+    expect(moveFocus([['a', 'b'], []], 'a', 'right')).toBe('a');
+    expect(moveFocus([['a', 'b'], []], 'b', 'left')).toBe('b');
+  });
+
+  it('visibleCardIds mirrors the rendered column (limit unless expanded)', () => {
+    const fifteen = Array.from({ length: 15 }, (_, i) => card(`c${i}`, { createdAt: i }));
+    const ids = fifteen.map((c) => c.id);
+    expect(visibleCardIds(fifteen, false)).toEqual(ids.slice(0, DEFAULT_COLUMN_LIMIT));
+    expect(visibleCardIds(fifteen, true)).toEqual(ids);
+    expect(visibleCardIds([], false)).toEqual([]);
+  });
+
+  it('cardElId is the DOM id contract between Card and the drawer focus restore', () => {
+    expect(cardElId('t_abc')).toBe('card-t_abc');
   });
 });
