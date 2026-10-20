@@ -276,6 +276,56 @@ export function relativeAge(transitionMs: number, nowMs: number): string {
   return `${Math.floor(ageMs / DAY_MS)}d ago`;
 }
 
+// --- Per-column summary strip (Card D) --------------------------------------
+//
+// Each status chip in the summary strip shows its own card count, its stalled
+// running cards, and the last time the column changed — derived once from the
+// snapshot cards here, then the relative-age label ticks against the client
+// clock. Column "last updated" is the newest card activity in the column: a
+// card's last status transition (the moment it entered its current column),
+// falling back to creation time when the card has no recorded transition so a
+// freshly-created card never renders as "never".
+
+export interface ColumnSummary {
+  status: TaskStatus;
+  /** Cards in the column (0 for an empty column). */
+  count: number;
+  /** Running cards with a stale/missing heartbeat (`isStalled`); always 0 outside Running. */
+  stalled: number;
+  /**
+   * Most recent activity stamp (unix ms) among the column's cards, or `null`
+   * when the column has no cards — nothing to date, rendered as a placeholder.
+   */
+  lastUpdatedMs: number | null;
+}
+
+/** Per-card "when did this column change" stamp (unix ms): the card's last
+ * status transition when recorded (wire `at` is unix seconds → ms), else its
+ * creation time — a card that was never moved still dates the column it sits
+ * in. */
+function cardUpdatedMs(card: CardView): number {
+  return (card.lastTransition?.at ?? card.createdAt) * 1000;
+}
+
+/** One entry per status in STATUS_ORDER — every column present, empty ones
+ * included — aggregating card count, stalled running cards, and the newest
+ * activity stamp. Pure and snapshot-scoped: the strip computes it once per
+ * snapshot (new `cards` array) and only the age label ticks from `now`. */
+export function columnSummary(cards: CardView[]): ColumnSummary[] {
+  const statuses = Object.keys(STATUS_ORDER) as TaskStatus[];
+  const entries = new Map<TaskStatus, ColumnSummary>(
+    statuses.map((status) => [status, { status, count: 0, stalled: 0, lastUpdatedMs: null }]),
+  );
+  for (const c of cards) {
+    const e = entries.get(c.status)!;
+    e.count += 1;
+    if (isStalled(c)) e.stalled += 1;
+    const t = cardUpdatedMs(c);
+    if (e.lastUpdatedMs === null || t > e.lastUpdatedMs) e.lastUpdatedMs = t;
+  }
+  return statuses.map((status) => entries.get(status)!);
+}
+
 function reconcile(
   snapshot: BoardSnapshot,
   upserts: CardView[],
