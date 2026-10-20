@@ -20,6 +20,7 @@
     formatDuration,
     isStalled,
     recentTransition,
+    relativeAge,
     stallAgeMs,
     type FocusDirection,
   } from '../board-view';
@@ -168,6 +169,18 @@
       >{card.runCount} tries</span>
     {/if}
   </div>
+  {#if card.lastTransition}
+    <footer
+      class="mt-2 flex items-center gap-1.5 border-t border-default pt-1.5 text-[11px] text-faint"
+      title={`Last status change: ${new Date(card.lastTransition.at * 1000).toLocaleString()}`}
+    >
+      <svg class="size-3" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5" />
+        <path d="M8 4.5V8l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <span>{relativeAge(card.lastTransition.at * 1000, now)}</span>
+    </footer>
+  {/if}
 </article>
 
 <style>

@@ -17,6 +17,7 @@ import {
   PRIMARY_COLUMNS,
   recentTransition,
   reduceBoard,
+  relativeAge,
   sortByNewestFirst,
   sortCards,
   sortStalledToTop,
@@ -332,6 +333,43 @@ describe('Impl — recentTransition window derivation', () => {
     const c = card('a', { lastTransition: { to: 'done', at } });
     expect(recentTransition(c, at * 1000 + 3_000, 2_000)).toBeNull(); // outside custom window
     expect(recentTransition(c, at * 1000 + 1_500, 2_000)).toEqual({ to: 'done', at });
+  });
+});
+
+describe('Impl — relativeAge footer', () => {
+  // `at` is unix seconds on the card wire; `relativeAge` takes unix ms.
+  const at = 1_700_000_005;
+
+  it('floors at "just now" for the first minute (and clamps clock skew)', () => {
+    expect(relativeAge(at * 1000, at * 1000)).toBe('just now'); // age 0
+    expect(relativeAge(at * 1000, at * 1000 + 59_999)).toBe('just now'); // 59s boundary
+    expect(relativeAge(at * 1000, at * 1000 - 5_000)).toBe('just now'); // now before the move
+  });
+
+  it('rolls 59s → "1m ago" at exactly 60s', () => {
+    expect(relativeAge(at * 1000, at * 1000 + 60_000)).toBe('1m ago');
+  });
+
+  it('counts minutes as a single unit up to 59m', () => {
+    expect(relativeAge(at * 1000, at * 1000 + 3 * 60_000)).toBe('3m ago');
+    expect(relativeAge(at * 1000, at * 1000 + 59 * 60_000)).toBe('59m ago'); // 59m boundary
+    expect(relativeAge(at * 1000, at * 1000 + 3_599_999)).toBe('59m ago'); // 59m 59.999s
+  });
+
+  it('rolls 59m → "1h ago" at exactly 1h', () => {
+    expect(relativeAge(at * 1000, at * 1000 + 3_600_000)).toBe('1h ago');
+  });
+
+  it('counts hours as a single unit up to 23h', () => {
+    expect(relativeAge(at * 1000, at * 1000 + 2 * 3_600_000)).toBe('2h ago');
+    expect(relativeAge(at * 1000, at * 1000 + 23 * 3_600_000)).toBe('23h ago'); // 23h boundary
+    expect(relativeAge(at * 1000, at * 1000 + 86_399_999)).toBe('23h ago'); // 23h 59m 59.999s
+  });
+
+  it('rolls 23h → "1d ago" at exactly 24h and keeps counting days', () => {
+    expect(relativeAge(at * 1000, at * 1000 + 86_400_000)).toBe('1d ago');
+    expect(relativeAge(at * 1000, at * 1000 + 2 * 86_400_000)).toBe('2d ago');
+    expect(relativeAge(at * 1000, at * 1000 + 30 * 86_400_000)).toBe('30d ago');
   });
 });
 
