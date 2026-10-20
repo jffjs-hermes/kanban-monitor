@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cardElId,
   COLUMN_DEFS,
+  columnSummary,
   DEFAULT_COLUMN_LIMIT,
   distinctAssignees,
   filterByAssignee,
@@ -433,6 +434,89 @@ describe('Impl — stalled / credit-burn alerting', () => {
     expect(formatDuration(45_000)).toBe('45s');
     expect(formatDuration(185_000)).toBe('3m 5s');
     expect(formatDuration(3 * 3600_000 + 5 * 60_000)).toBe('3h 5m');
+  });
+});
+
+describe('per-column summary strip (Card D) — columnSummary', () => {
+  // Wire timestamps (`createdAt`, `lastTransition.at`) are unix seconds;
+  // `lastUpdatedMs` is unix ms — the helper converts like the card footer does.
+  const s = (n: number): number => 1_700_000_000 + n; // unix seconds
+
+  const by = (sum: ReturnType<typeof columnSummary>) =>
+    Object.fromEntries(sum.map((e) => [e.status, e]));
+
+  it('returns one entry per status in column order, empty columns included', () => {
+    const sum = columnSummary([card('r1', { status: 'ready' }), card('d1', { status: 'done' })]);
+    expect(sum.map((e) => e.status)).toEqual([
+      'triage', 'todo', 'ready', 'running', 'review', 'blocked', 'done', 'archived',
+    ]);
+    const b = by(sum);
+    expect(b.ready).toMatchObject({ status: 'ready', count: 1, stalled: 0 });
+    expect(b.done).toMatchObject({ status: 'done', count: 1, stalled: 0 });
+    expect(b.running).toMatchObject({ count: 0, stalled: 0 }); // absent column still present
+    expect(b.archived).toMatchObject({ count: 0, stalled: 0 });
+  });
+
+  it('counts cards per column', () => {
+    const sum = columnSummary([
+      card('r1', { status: 'ready' }),
+      card('r2', { status: 'ready' }),
+      card('x', { status: 'running' }),
+      card('b1', { status: 'blocked' }),
+    ]);
+    const b = by(sum);
+    expect(b.ready.count).toBe(2);
+    expect(b.running.count).toBe(1);
+    expect(b.blocked.count).toBe(1);
+    expect(b.review.count).toBe(0);
+  });
+
+  it('extracts per-column stalled counts — stalled running cards only (isStalled semantics)', () => {
+    const running = (over: Partial<CardView> = {}): CardView =>
+      card('r', { status: 'running', liveness: 'active', elapsedMs: 0, ...over });
+    const sum = columnSummary([
+      running({ id: 's1', liveness: 'stalled' }),
+      running({ id: 's2', liveness: 'stalled' }),
+      running({ id: 'a1', liveness: 'active' }),
+      card('d1', { status: 'done', liveness: 'stalled' }), // non-running liveness is never stalled
+    ]);
+    const b = by(sum);
+    expect(b.running).toMatchObject({ count: 3, stalled: 2 });
+    expect(b.done).toMatchObject({ count: 1, stalled: 0 });
+  });
+
+  it('dates a column from its newest lastTransition (unix seconds → ms)', () => {
+    const sum = columnSummary([
+      card('old', { status: 'ready', lastTransition: { to: 'ready', at: s(100) } }),
+      card('new', { status: 'ready', lastTransition: { to: 'ready', at: s(500) } }),
+      card('other', { status: 'review', lastTransition: { to: 'review', at: s(900) } }),
+    ]);
+    const b = by(sum);
+    expect(b.ready.lastUpdatedMs).toBe(s(500) * 1000);
+    expect(b.review.lastUpdatedMs).toBe(s(900) * 1000);
+  });
+
+  it('falls back to createdAt when a card has no recorded transition (missing/null timestamps)', () => {
+    const sum = columnSummary([
+      card('never-moved', { status: 'ready', createdAt: s(999), lastTransition: null }),
+      card('moved', { status: 'ready', createdAt: s(1), lastTransition: { to: 'ready', at: s(100) } }),
+      // Default factory card: createdAt s(0), lastTransition null — must not crash.
+      card('bare', { status: 'blocked' }),
+    ]);
+    const b = by(sum);
+    expect(b.ready.lastUpdatedMs).toBe(s(999) * 1000); // creation outdates the older transition
+    expect(b.blocked.lastUpdatedMs).toBe(s(0) * 1000);
+    // A bare card (null transition, default createdAt) still dates its column.
+    expect(by(columnSummary([card('bare2')])).ready.lastUpdatedMs).toBe(s(0) * 1000);
+  });
+
+  it('yields null lastUpdatedMs for empty columns and never errors on zero cards', () => {
+    const empty = columnSummary([]);
+    expect(empty).toHaveLength(8);
+    expect(empty.every((e) => e.count === 0 && e.stalled === 0 && e.lastUpdatedMs === null)).toBe(true);
+    // A cardless column among populated ones still renders a placeholder.
+    const b = by(columnSummary([card('r1', { status: 'ready', lastTransition: { to: 'ready', at: s(10) } })]));
+    expect(b.triage).toMatchObject({ count: 0, stalled: 0, lastUpdatedMs: null });
   });
 });
 

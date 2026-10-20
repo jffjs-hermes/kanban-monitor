@@ -243,6 +243,7 @@
     </div>
     <SummaryStrip
       summary={$board.snapshot.summary}
+      cards={$board.snapshot.cards}
       seq={$board.seq}
       {now}
       connected={$board.connected}
