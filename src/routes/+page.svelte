@@ -11,6 +11,8 @@
   import {
     cardElId,
     COLUMN_DEFS,
+    distinctAssignees,
+    filterByAssignee,
     groupByStatus,
     moveFocus,
     visibleCardIds,
@@ -25,6 +27,10 @@
 
   const LS_KEY = 'kanban-monitor.board';
   const THEME_KEY = 'kanban-monitor-theme';
+  // §5.0 localStorage convention: view preferences persist under a
+  // `kanban-monitor.*` key. The assignee filter uses `null` = "All" — see
+  // `AssigneeFilter` in board-view.ts.
+  const ASSIGNEE_LS_KEY = 'kanban-monitor.assignee';
 
   // Theme: toggle flips the `dark` class on <html>. Initial value is restored
   // from localStorage (defaulting to the system preference), matching the
@@ -65,6 +71,30 @@
   // triage/todo/archived subset behind a button; `collapsed` flags stay as-is.
   let showCollapsed = $state(true);
   let now = $state(Date.now()); // ticking clock for elapsed + footer
+
+  // Assignee filter (Card B): `null` = "All" (no filtering). Restored from
+  // localStorage so the choice survives reloads; reset on board switch.
+  function readStoredAssignee(): string | null {
+    try {
+      const v = localStorage.getItem(ASSIGNEE_LS_KEY);
+      return v && v.length > 0 ? v : null;
+    } catch {
+      return null;
+    }
+  }
+  let assigneeFilter = $state<string | null>(readStoredAssignee());
+  // Distinct assignees across all statuses the board renders, for the dropdown.
+  const assigneeOptions = $derived(distinctAssignees($board.snapshot?.cards ?? []));
+  function setAssigneeFilter(a: string | null) {
+    assigneeFilter = a;
+    focusedId = null; // a filtered-away card must not stay the roving tab stop
+    try {
+      if (a === null) localStorage.removeItem(ASSIGNEE_LS_KEY);
+      else localStorage.setItem(ASSIGNEE_LS_KEY, a);
+    } catch {
+      /* storage unavailable — session-only */
+    }
+  }
 
   // Keyboard navigation (Card A) — roving tabindex. `focusedId` names the one
   // card in the tab order; arrow keys move it one step over the rendered grid
@@ -119,6 +149,7 @@
     closeDrawer(); // a different board invalidates any open card detail
     focusedId = null; // and any keyboard selection
     expandedCols = {};
+    setAssigneeFilter(null); // filter resets to "All" on board switch
     try {
       localStorage.setItem(LS_KEY, slug);
     } catch {
@@ -129,9 +160,13 @@
 
   // Keyboard navigation (Card A). The visible layout: one column per rendered
   // column def, holding the ids the column actually shows (respecting the
-  // newest-N limit and its expansion toggle), in render order.
+  // newest-N limit and its expansion toggle), in render order. The assignee
+  // filter (Card B) narrows the cards before grouping, so columns, their
+  // counts, and the empty states all reflect the selection.
   const groups = $derived(
-    $board.snapshot ? groupByStatus($board.snapshot.cards) : groupByStatus([]),
+    $board.snapshot
+      ? groupByStatus(filterByAssignee($board.snapshot.cards, assigneeFilter))
+      : groupByStatus([]),
   );
   const focusColumns = $derived(
     COLUMN_DEFS.filter((d) => !d.collapsed || showCollapsed).map((d) =>
@@ -192,6 +227,20 @@
   </header>
 
   {#if $board.snapshot}
+    <div class="mb-3 flex flex-wrap items-center justify-end gap-2 text-[13px]">
+      <label for="assignee-filter" class="text-muted">Filter by assignee</label>
+      <select
+        id="assignee-filter"
+        class="cursor-pointer rounded-md border border-default bg-surface px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors duration-100 hover:border-border-strong"
+        value={assigneeFilter ?? ''}
+        onchange={(e) => setAssigneeFilter((e.currentTarget as HTMLSelectElement).value || null)}
+      >
+        <option value="">All</option>
+        {#each assigneeOptions as a (a)}
+          <option value={a}>{a}</option>
+        {/each}
+      </select>
+    </div>
     <SummaryStrip
       summary={$board.snapshot.summary}
       seq={$board.seq}

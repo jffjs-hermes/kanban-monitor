@@ -371,6 +371,36 @@ export function reduceBoard(
   }
 }
 
+// --- Assignee filter (Card B) ------------------------------------------------
+//
+// Pure helpers for the "Filter by assignee" dropdown above the summary strip.
+// The filter is a client-side view concern: it narrows which cards the columns
+// render (and therefore their counts/empty states) without touching the
+// server-derived summary strip.
+
+/** The assignee filter value: a card assignee name, or `null` = "All" (no
+ * filtering). `null` is the sentinel rather than `''` because unassigned cards
+ * (assignee `null`/`''`) must remain visible under "All" while matching no
+ * named filter — so `''` can't double as "All" without ambiguity. */
+export type AssigneeFilter = string | null;
+
+/** Distinct non-empty assignees across a snapshot's cards, sorted for a stable
+ * dropdown. Unassigned cards are not options — they only match the "All"
+ * filter. */
+export function distinctAssignees(cards: CardView[]): string[] {
+  const set = new Set<string>();
+  for (const c of cards) if (c.assignee) set.add(c.assignee);
+  return [...set].sort();
+}
+
+/** Keep only the cards assigned to `assignee`; `null` (or `''`) = "All" — no
+ * filtering. Matches the stored assignee exactly, so an unassigned card
+ * (assignee `null`/`''`) matches only "All", never a named filter. */
+export function filterByAssignee(cards: CardView[], assignee: AssigneeFilter): CardView[] {
+  if (!assignee) return cards;
+  return cards.filter((c) => c.assignee === assignee);
+}
+
 // --- Column formation (§1.2: Ready → Running → Review → Blocked → Done, with
 // triage/todo/archived collapsed/toggleable) ---------------------------------
 

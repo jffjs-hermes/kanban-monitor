@@ -105,6 +105,9 @@ Health check: `curl -s http://localhost:8787/api/boards.json`.
   dots (green active / amber stalled).
 - **Board switcher** — pick default or any named board; selection persists in
   `localStorage`.
+- **Assignee filter** — a "Filter by assignee" dropdown above the summary strip
+  narrows the whole board to one assignee (column counts and "No cards" empty
+  states follow); persists in `localStorage` and resets to "All" on board switch.
 - **Card detail drawer** — click a card to see its body, status-transition trail
   (from `task_events`), run attempts/outcomes (from `task_runs`), comments
   (from `task_comments`), and clickable parent/child links (from `task_links`).
