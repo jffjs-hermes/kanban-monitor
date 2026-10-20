@@ -251,6 +251,31 @@ export function formatDuration(ms: number): string {
   return `${sec}s`;
 }
 
+// --- Relative-age footer (Card C) ------------------------------------------
+//
+// Every card footer shows how long ago its most recent status transition
+// happened. Pure function of `transitionMs` vs the ticking client clock, so
+// the label ticks up in place on every re-render from state (card's
+// `lastTransition`), survives a reload, and needs no server fields.
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+/**
+ * Compact "how long ago" label for a card's most recent status move, single
+ * unit: "just now" (hard floor for the first minute — the label never counts
+ * seconds), then "3m ago" up to 59m, "2h ago" up to 23h, then "1d ago" and
+ * up. `nowMs` before the transition (clock skew) clamps to "just now".
+ */
+export function relativeAge(transitionMs: number, nowMs: number): string {
+  const ageMs = Math.max(0, nowMs - transitionMs);
+  if (ageMs < MINUTE_MS) return 'just now';
+  if (ageMs < HOUR_MS) return `${Math.floor(ageMs / MINUTE_MS)}m ago`;
+  if (ageMs < DAY_MS) return `${Math.floor(ageMs / HOUR_MS)}h ago`;
+  return `${Math.floor(ageMs / DAY_MS)}d ago`;
+}
+
 function reconcile(
   snapshot: BoardSnapshot,
   upserts: CardView[],
